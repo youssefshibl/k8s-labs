@@ -87,6 +87,88 @@ spec:
           requests:
             storage: 1Gi
 ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongodb-backup
+  labels:
+    app: mongodb
+    role: backup
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mongodb-backup
+  labels:
+    app: mongodb
+    role: backup
+spec:
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 120
+      template:
+        metadata:
+          labels:
+            app: mongodb
+            role: backup
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: mongodump
+              image: mongo:7.0
+              env:
+                - name: MONGO_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: mongodb-secret
+                      key: username
+                - name: MONGO_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: mongodb-secret
+                      key: password
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  STAMP=$(date +%Y%m%d-%H%M%S)
+                  OUT="/backup/mongodb-${STAMP}"
+                  echo "Backing up MongoDB to ${OUT} ..."
+                  mongodump \
+                    --host=mongodb \
+                    --port=27017 \
+                    --username="${MONGO_USERNAME}" \
+                    --password="${MONGO_PASSWORD}" \
+                    --authenticationDatabase=admin \
+                    --out="${OUT}"
+                  echo "Backup complete: ${OUT}"
+                  ls -la /backup
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  cpu: 200m
+                  memory: 256Mi
+          volumes:
+            - name: backup
+              persistentVolumeClaim:
+                claimName: mongodb-backup
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:

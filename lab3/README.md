@@ -10,6 +10,8 @@ Same stack as lab2 (mongo-express + MongoDB), but MongoDB runs as a **StatefulSe
 | Service      | `mongodb`        | Headless (`clusterIP: None`), port 27017           |
 | StatefulSet  | `mongodb`        | 1 replica, `mongo:7.0`, PVC at `/data/db`          |
 | PVC          | `mongodb-data-mongodb-0` | 1Gi, created by `volumeClaimTemplates`      |
+| PVC          | `mongodb-backup` | 2Gi, separate volume for daily dumps               |
+| CronJob      | `mongodb-backup` | `mongodump` every day at 02:00 → backup PVC        |
 | Deployment   | `test-web`       | 2 replicas, `mongo-express` → connects to MongoDB  |
 | Service      | `test-web`       | ClusterIP, port 80 → 8081                          |
 | Ingress      | `test-web`       | host `test-web.test.local`, TLS via cert-manager   |
@@ -68,7 +70,7 @@ kubectl apply -f main.yml
 Check status:
 
 ```bash
-kubectl get secret,sts,svc,pvc,deploy,ingress,certificate,clusterissuer
+kubectl get secret,sts,svc,pvc,deploy,cronjob,ingress,certificate,clusterissuer
 kubectl get pods -l 'app in (mongodb,test-web)'
 kubectl describe certificate -A
 ```
@@ -96,6 +98,35 @@ kubectl get pvc mongodb-data-mongodb-0
 kubectl wait --for=condition=ready pod/mongodb-0 --timeout=120s
 ```
 
+## Daily MongoDB backup
+
+`mongodb-backup` CronJob runs **every day at 02:00** (`0 2 * * *`), dumps the database with `mongodump`, and writes timestamped folders to the **`mongodb-backup` PVC** (separate from the live data PVC).
+
+After a run finishes, the Job pod goes to **Completed** (not deleted). That is normal — the process already exited. Jobs are removed automatically after `ttlSecondsAfterFinished: 120` (2 minutes).
+
+Check the CronJob:
+
+```bash
+kubectl get cronjob mongodb-backup
+kubectl get pvc mongodb-backup
+```
+
+Trigger a backup immediately (instead of waiting for 02:00):
+
+```bash
+kubectl create job --from=cronjob/mongodb-backup mongodb-backup-manual
+kubectl wait --for=condition=complete job/mongodb-backup-manual --timeout=120s
+kubectl logs job/mongodb-backup-manual
+```
+
+List dump folders on the backup PVC:
+
+```bash
+kubectl run backup-ls --rm -it --restart=Never \
+  --image=busybox:1.36 \
+  --overrides='{"spec":{"containers":[{"name":"ls","image":"busybox:1.36","command":["ls","-la","/backup"],"volumeMounts":[{"name":"backup","mountPath":"/backup"}]}],"volumes":[{"name":"backup","persistentVolumeClaim":{"claimName":"mongodb-backup"}}]}}'
+```
+
 ## Access
 
 Open in a browser:
@@ -120,7 +151,9 @@ Note: deleting the StatefulSet does **not** always remove PVCs created by `volum
 
 ```bash
 kubectl delete pvc -l app=mongodb
+kubectl delete pvc mongodb-backup
 ```
+
 
 Optional — remove cert-manager itself:
 
