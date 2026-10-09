@@ -2,6 +2,24 @@
 
 Shared cert-manager CA used by labs that need TLS (e.g. lab3). Apply once per cluster.
 
+## Architecture
+
+```mermaid
+flowchart LR
+  Bootstrap["ClusterIssuer<br/>selfsigned-bootstrap"]
+  Cert["Certificate<br/>labs-ca"]
+  Secret["Secret<br/>labs-ca-secret"]
+  Issuer["ClusterIssuer<br/>labs-ca-issuer"]
+  Ingress["Lab Ingress<br/>e.g. test-web"]
+  TLS["TLS Secret<br/>e.g. test-web-tls"]
+
+  Bootstrap -->|signs| Cert
+  Cert --> Secret
+  Secret -->|CA for| Issuer
+  Issuer -->|signs| TLS
+  TLS -->|used by| Ingress
+```
+
 ## Prerequisites
 
 - kind cluster (`kind-dev`)

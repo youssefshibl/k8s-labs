@@ -13,6 +13,25 @@ Deploy a test web app (mongo-express) that connects to MongoDB on a local kind c
 | Service    | `test-web`       | ClusterIP, port 80 → 8081                          |
 | Ingress    | `test-web`       | host `test-web.test.local`, class `nginx`          |
 
+## Architecture
+
+```mermaid
+flowchart LR
+  Browser["Browser / curl"]
+  IC["ingress-nginx"]
+  Ing["Ingress<br/>test-web.test.local"]
+  WebSvc["Service<br/>test-web :80"]
+  Web["Deployment<br/>test-web ×2<br/>mongo-express"]
+  Secret["Secret<br/>mongodb-secret"]
+  DbSvc["Service<br/>mongodb :27017"]
+  Db["Deployment<br/>mongodb<br/>mongo:7.0"]
+
+  Browser --> IC --> Ing --> WebSvc --> Web
+  Web -->|"mongodb://…@mongodb:27017/"| DbSvc --> Db
+  Secret -.->|credentials| Web
+  Secret -.->|credentials| Db
+```
+
 ## How the app connects
 
 `test-web` uses the in-cluster DNS name `mongodb` and credentials from `mongodb-secret`:

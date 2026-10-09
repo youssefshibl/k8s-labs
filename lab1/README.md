@@ -10,6 +10,26 @@ Simple nginx app on a local kind cluster with MetalLB + nginx Ingress.
 | Service    | `test-app` | ClusterIP, port 80                         |
 | Ingress    | `test-app` | host `test-app.test.local`, class `nginx`  |
 
+## Architecture
+
+```mermaid
+flowchart LR
+  Browser["Browser / curl"]
+  DNS["dnsmasq<br/>*.test.local"]
+  LB["MetalLB<br/>Ingress LB IP"]
+  IC["ingress-nginx<br/>controller"]
+  Ing["Ingress<br/>test-app"]
+  Svc["Service<br/>test-app :80"]
+  Pods["Deployment<br/>test-app ×2<br/>nginx"]
+
+  Browser --> DNS
+  DNS --> LB
+  LB --> IC
+  IC --> Ing
+  Ing --> Svc
+  Svc --> Pods
+```
+
 ## Prerequisites
 
 - kind cluster (`kind-dev`)

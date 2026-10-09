@@ -17,6 +17,37 @@ Same stack as lab2 (mongo-express + MongoDB), but MongoDB runs as a **StatefulSe
 | Ingress      | `test-web`       | host `test-web.test.local`, TLS via cert-manager   |
 | Secret       | `test-web-tls`   | TLS cert/key signed by `labs-ca-issuer`            |
 
+## Architecture
+
+```mermaid
+flowchart TB
+  Browser["Browser / curl<br/>HTTPS"]
+  IC["ingress-nginx"]
+  Ing["Ingress<br/>test-web.test.local"]
+  TLS["Secret<br/>test-web-tls"]
+  CM["cert-manager<br/>labs-ca-issuer"]
+  WebSvc["Service<br/>test-web :80"]
+  Web["Deployment<br/>test-web ×2<br/>mongo-express"]
+  Secret["Secret<br/>mongodb-secret"]
+  DbSvc["Service headless<br/>mongodb :27017"]
+  Db["StatefulSet<br/>mongodb-0"]
+  DataPVC["PVC<br/>mongodb-data"]
+  Cron["CronJob<br/>mongodb-backup<br/>daily 02:00"]
+  BackupPVC["PVC<br/>mongodb-backup"]
+
+  Browser --> IC --> Ing
+  CM -.->|issues| TLS
+  TLS -.->|TLS terminate| Ing
+  Ing --> WebSvc --> Web
+  Web -->|"mongodb://…@mongodb:27017/"| DbSvc --> Db
+  Db --> DataPVC
+  Secret -.->|credentials| Web
+  Secret -.->|credentials| Db
+  Secret -.->|credentials| Cron
+  Cron -->|"mongodump"| DbSvc
+  Cron --> BackupPVC
+```
+
 ## Lab2 vs Lab3
 
 | | Lab2 | Lab3 |

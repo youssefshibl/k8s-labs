@@ -8,6 +8,47 @@ Local Kubernetes labs on kind (`kind-dev`) with MetalLB + nginx Ingress.
 | [lab2](lab2/) | Web app (mongo-express) connected to MongoDB |
 | [lab3](lab3/) | Stateful MongoDB + TLS via cert-manager (`test-web.test.local`) |
 
+## Architecture overview
+
+```mermaid
+flowchart TB
+  subgraph shared [Shared cluster]
+    DNS["dnsmasq *.test.local"]
+    LB["MetalLB"]
+    IC["ingress-nginx"]
+    CM["cert-manager + setup/ local CA"]
+  end
+
+  subgraph lab1 [Lab 1]
+    L1Ing["Ingress test-app"]
+    L1Svc["Service test-app"]
+    L1Dep["Deployment nginx"]
+    L1Ing --> L1Svc --> L1Dep
+  end
+
+  subgraph lab2 [Lab 2]
+    L2Ing["Ingress test-web"]
+    L2Web["Service + Deployment<br/>mongo-express"]
+    L2Db["Service + Deployment<br/>mongodb"]
+    L2Ing --> L2Web --> L2Db
+  end
+
+  subgraph lab3 [Lab 3]
+    L3Ing["Ingress test-web + TLS"]
+    L3Web["Service + Deployment<br/>mongo-express"]
+    L3Db["Headless Service + StatefulSet<br/>mongodb + data PVC"]
+    L3Cron["CronJob backup → backup PVC"]
+    L3Ing --> L3Web --> L3Db
+    L3Cron --> L3Db
+  end
+
+  DNS --> LB --> IC
+  IC --> L1Ing
+  IC --> L2Ing
+  IC --> L3Ing
+  CM -.-> L3Ing
+```
+
 ## Setup (shared)
 
 One-time cluster setup used by labs that need TLS:
