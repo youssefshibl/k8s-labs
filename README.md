@@ -8,6 +8,21 @@ Local Kubernetes labs on kind (`kind-dev`) with MetalLB + nginx Ingress.
 | [lab2](lab2/) | Web app (mongo-express) connected to MongoDB |
 | [lab3](lab3/) | Stateful MongoDB + TLS via cert-manager (`test-web.test.local`) |
 
+## Setup (shared)
+
+One-time cluster setup used by labs that need TLS:
+
+| Path | Purpose |
+|------|---------|
+| [setup/](setup/) | Local CA + `labs-ca-issuer` (cert-manager) |
+
+```bash
+# after cert-manager is installed
+kubectl apply -f setup/local-ca.yml
+```
+
+See [setup/README.md](setup/README.md) to trust the CA on the host.
+
 ---
 
 ## Kubernetes Dashboard

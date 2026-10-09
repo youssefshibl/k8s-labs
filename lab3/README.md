@@ -12,9 +12,8 @@ Same stack as lab2 (mongo-express + MongoDB), but MongoDB runs as a **StatefulSe
 | PVC          | `mongodb-data-mongodb-0` | 1Gi, created by `volumeClaimTemplates`      |
 | Deployment   | `test-web`       | 2 replicas, `mongo-express` → connects to MongoDB  |
 | Service      | `test-web`       | ClusterIP, port 80 → 8081                          |
-| ClusterIssuer| `selfsigned-issuer` | cert-manager self-signed issuer (local `.local`) |
 | Ingress      | `test-web`       | host `test-web.test.local`, TLS via cert-manager   |
-| Secret       | `test-web-tls`   | TLS cert/key created by cert-manager               |
+| Secret       | `test-web-tls`   | TLS cert/key signed by `labs-ca-issuer`            |
 
 ## Lab2 vs Lab3
 
@@ -27,11 +26,11 @@ Same stack as lab2 (mongo-express + MongoDB), but MongoDB runs as a **StatefulSe
 
 ## How TLS works
 
-1. Ingress asks cert-manager for a cert (`cert-manager.io/cluster-issuer: selfsigned-issuer`).
-2. cert-manager creates Secret `test-web-tls` for host `test-web.test.local`.
-3. nginx Ingress terminates HTTPS using that secret.
+1. Ingress asks cert-manager for a cert (`cert-manager.io/cluster-issuer: labs-ca-issuer`).
+2. cert-manager creates Secret `test-web-tls` for host `test-web.test.local`, signed by the labs CA.
+3. nginx Ingress terminates HTTPS using that secret (HTTP redirects to HTTPS).
 
-Self-signed is used because Let's Encrypt cannot issue for `*.test.local`. The browser will warn until you accept the cert.
+Let's Encrypt cannot issue for `*.test.local`, so labs use the shared local CA from [`setup/`](../setup/). Trust that CA on the host for browser/curl without warnings.
 
 ## How the app connects
 
@@ -52,19 +51,12 @@ Same as lab1:
 - MetalLB (LoadBalancer EXTERNAL-IP)
 - Wildcard DNS for `*.test.local` (dnsmasq)
 - A default StorageClass (kind provides one)
-- **cert-manager** (see below)
-
-### Install cert-manager
+- **cert-manager** + labs local CA — see [`setup/`](../setup/)
 
 ```bash
 kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
-```
-
-Wait until ready:
-
-```bash
 kubectl wait --for=condition=Available deployment --all -n cert-manager --timeout=120s
-kubectl get pods -n cert-manager
+kubectl apply -f ../setup/local-ca.yml
 ```
 
 ## Apply
@@ -106,16 +98,16 @@ kubectl wait --for=condition=ready pod/mongodb-0 --timeout=120s
 
 ## Access
 
-Open in a browser (accept the self-signed warning):
+Open in a browser:
 
 ```
 https://test-web.test.local
 ```
 
-Or with curl (skip verify for the lab cert):
+Or with curl:
 
 ```bash
-curl -kI https://test-web.test.local
+curl -I https://test-web.test.local
 ```
 
 ## Cleanup

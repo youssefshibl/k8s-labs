@@ -146,20 +146,15 @@ spec:
       port: 80
       targetPort: 8081
 ---
-apiVersion: cert-manager.io/v1
-kind: ClusterIssuer
-metadata:
-  name: selfsigned-issuer
-spec:
-  selfSigned: {}
----
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: test-web
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
-    cert-manager.io/cluster-issuer: selfsigned-issuer
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: labs-ca-issuer
+    cert-manager.io/common-name: test-web.test.local
 spec:
   ingressClassName: nginx
   tls:
