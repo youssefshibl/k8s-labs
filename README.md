@@ -6,6 +6,7 @@ Local Kubernetes labs on kind (`kind-dev`) with MetalLB + nginx Ingress.
 |-----|-------------|
 | [lab1](lab1/) | Test nginx Deployment, Service & Ingress |
 | [lab2](lab2/) | Web app (mongo-express) connected to MongoDB |
+| [lab3](lab3/) | Stateful MongoDB + TLS via cert-manager (`test-web.test.local`) |
 
 ---
 
