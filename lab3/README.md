@@ -119,12 +119,55 @@ kubectl wait --for=condition=complete job/mongodb-backup-manual --timeout=120s
 kubectl logs job/mongodb-backup-manual
 ```
 
-List dump folders on the backup PVC:
+### Access / download backups
+
+The dumps live only on the `mongodb-backup` PVC. Start a short-lived helper pod that mounts it, then copy files out with `kubectl cp`.
 
 ```bash
-kubectl run backup-ls --rm -it --restart=Never \
-  --image=busybox:1.36 \
-  --overrides='{"spec":{"containers":[{"name":"ls","image":"busybox:1.36","command":["ls","-la","/backup"],"volumeMounts":[{"name":"backup","mountPath":"/backup"}]}],"volumes":[{"name":"backup","persistentVolumeClaim":{"claimName":"mongodb-backup"}}]}}'
+# 1) Helper pod with the backup volume mounted
+kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mongodb-backup-access
+spec:
+  containers:
+    - name: access
+      image: busybox:1.36
+      command: ["sleep", "3600"]
+      volumeMounts:
+        - name: backup
+          mountPath: /backup
+  volumes:
+    - name: backup
+      persistentVolumeClaim:
+        claimName: mongodb-backup
+  restartPolicy: Never
+EOF
+
+kubectl wait --for=condition=Ready pod/mongodb-backup-access --timeout=60s
+
+# 2) List dumps
+kubectl exec mongodb-backup-access -- ls -la /backup
+
+# 3) Download one dump folder to your machine (change the folder name)
+kubectl cp mongodb-backup-access:/backup/mongodb-20261009-120715 ./mongodb-20261009-120715
+
+# Or pack everything into a tarball first, then copy
+kubectl exec mongodb-backup-access -- tar -czf /tmp/mongodb-backups.tar.gz -C /backup .
+kubectl cp mongodb-backup-access:/tmp/mongodb-backups.tar.gz ./mongodb-backups.tar.gz
+
+# 4) Clean up the helper
+kubectl delete pod mongodb-backup-access
+```
+
+Restore example (into the running MongoDB, from a local dump folder):
+
+```bash
+kubectl cp ./mongodb-20261009-120715 mongodb-0:/tmp/restore
+kubectl exec -it mongodb-0 -- mongorestore \
+  --username=admin --password=changeme --authenticationDatabase=admin \
+  /tmp/restore
 ```
 
 ## Access
