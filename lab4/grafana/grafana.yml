@@ -162,12 +162,13 @@ spec:
             sources:
               - configMap:
                   name: grafana-dashboards
-              - configMap:
-                  name: grafana-dashboards-mongodb
-                  optional: true
-              - configMap:
-                  name: grafana-dashboards-postgresql
-                  optional: true
+              # add this back in if you want to use the mongodb and postgresql dashboards
+              # - configMap:
+              #     name: grafana-dashboards-mongodb
+              #     optional: true
+              # - configMap:
+              #     name: grafana-dashboards-postgresql
+              #     optional: true
         - name: storage
           emptyDir: {}
 ---
