@@ -63,6 +63,7 @@ rules:
     resources:
       - nodes
       - nodes/metrics
+      - nodes/proxy
       - services
       - endpoints
       - pods
@@ -106,14 +107,11 @@ subjects:
 # Prometheus Operator mounts this Secret into the Prometheus pod and merges
 # the YAML under prometheus-additional.yaml into prometheus.yml.
 #
-# Job "kubernetes-pods":
-#   - Discovers EVERY pod in the cluster (role: pod)
-#   - KEEP only pods with annotation prometheus.io/scrape=true
-#   - Optionally rewrite path/port from annotations
-#   - Copy useful labels (pod name, namespace, pod labels) onto the time series
+# Jobs:
+#   kubernetes-pods     — annotation scrape (prometheus.io/scrape=true)
+#   kubelet-cadvisor — real CPU / memory / network / FS via API → kubelet cAdvisor
 #
-# This is how you scrape apps that do NOT have a ServiceMonitor yet.
-# Example: metrics-demo (block 13) sets those annotations.
+# Example: metrics-demo (block 15) sets those annotations.
 # -----------------------------------------------------------------------------
 apiVersion: v1
 kind: Secret
@@ -159,6 +157,31 @@ stringData:
         - source_labels: [__meta_kubernetes_pod_name]
           action: replace
           target_label: pod
+
+    # Real container usage (CPU / memory / network / filesystem).
+    # Scrapes kubelet cAdvisor through the API server proxy so we do not
+    # need a direct kubelet port from the Prometheus pod.
+    - job_name: kubelet-cadvisor
+      scheme: https
+      metrics_path: /metrics/cadvisor
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        insecure_skip_verify: true
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      kubernetes_sd_configs:
+        - role: node
+      relabel_configs:
+        - action: labelmap
+          regex: __meta_kubernetes_node_label_(.+)
+        - target_label: __address__
+          replacement: kubernetes.default.svc:443
+        - source_labels: [__meta_kubernetes_node_name]
+          regex: (.+)
+          target_label: __metrics_path__
+          replacement: /api/v1/nodes/$1/proxy/metrics/cadvisor
+        - source_labels: [__meta_kubernetes_node_name]
+          action: replace
+          target_label: node
 ---
 # -----------------------------------------------------------------------------
 # BLOCK 6 — Prometheus custom resource (CR)

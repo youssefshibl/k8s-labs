@@ -66,7 +66,7 @@ One-time / shared cluster pieces used by labs:
 | Path | Purpose |
 |------|---------|
 | [setup/local-ca.yml](setup/local-ca.yml) | Local CA + `labs-ca-issuer` (cert-manager) — lab3, dashboard |
-| [setup/prometheus/](setup/prometheus/) | Prometheus Operator stack — [README](setup/prometheus/README.md) (lab4) |
+| [setup/prometheus/](setup/prometheus/) | Prometheus + Grafana — [README](setup/prometheus/README.md) (lab4) |
 | [setup/dashboard/](setup/dashboard/) | Kubernetes Dashboard Ingress — [README](setup/dashboard/README.md) |
 
 ```bash
@@ -75,6 +75,10 @@ kubectl apply -f setup/local-ca.yml
 
 # after prometheus-operator bundle is installed (lab4)
 kubectl apply -f setup/prometheus/prometheus.yml
+kubectl create configmap grafana-dashboards -n monitoring \
+  --from-file=setup/prometheus/grafana/dashboards/ \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -f setup/prometheus/grafana/grafana.yml
 
 # dashboard UI (after Dashboard + local CA are installed)
 kubectl apply -f setup/dashboard/admin-user.yml

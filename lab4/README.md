@@ -24,7 +24,7 @@ Same app stack as [lab2](../lab2/) (mongo-express + MongoDB), plus the shared Pr
 
 ### From `setup/prometheus/`
 
-Prometheus, kube-state-metrics, ServiceMonitors, and Ingress — full list in [`setup/prometheus/README.md`](../setup/prometheus/README.md).
+Prometheus, Grafana, kube-state-metrics, ServiceMonitors, and Ingress — full list in [`setup/prometheus/README.md`](../setup/prometheus/README.md).
 
 ## Architecture
 
@@ -34,12 +34,16 @@ flowchart LR
   IC["ingress-nginx"]
   WebIng["Ingress<br/>test-web.test.local"]
   PromIng["Ingress<br/>prometheus.test.local"]
+  GrafIng["Ingress<br/>grafana.test.local"]
   Web["test-web + mongodb<br/>main.yml"]
   Prom["Prometheus<br/>setup/prometheus/"]
+  Graf["Grafana"]
 
   Browser --> IC
   IC --> WebIng --> Web
   IC --> PromIng --> Prom
+  IC --> GrafIng --> Graf
+  Graf -->|query| Prom
   Prom -.->|metrics about| Web
 ```
 
@@ -60,8 +64,12 @@ Plus Prometheus Operator — see [`setup/prometheus/README.md`](../setup/prometh
 # 1) App stack (same as lab2)
 kubectl apply -f main.yml
 
-# 2) Prometheus stack (shared setup)
+# 2) Prometheus + Grafana (shared setup)
 kubectl apply -f ../setup/prometheus/prometheus.yml
+kubectl create configmap grafana-dashboards -n monitoring \
+  --from-file=../setup/prometheus/grafana/dashboards/ \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -f ../setup/prometheus/grafana/grafana.yml
 ```
 
 Check app:
@@ -71,7 +79,7 @@ kubectl get deploy,svc,ingress -l 'app in (mongodb,test-web)'
 kubectl get pods -l 'app in (mongodb,test-web)'
 ```
 
-Prometheus status, queries, and targets: [`setup/prometheus/README.md`](../setup/prometheus/README.md).
+Prometheus / Grafana status, queries, and targets: [`setup/prometheus/README.md`](../setup/prometheus/README.md).
 
 ## Access
 
@@ -87,9 +95,17 @@ Prometheus UI:
 http://prometheus.test.local
 ```
 
+Grafana UI (`admin` / `admin`):
+
+```
+http://grafana.test.local
+```
+
 ## Cleanup
 
 ```bash
+kubectl delete configmap grafana-dashboards -n monitoring --ignore-not-found
+kubectl delete -f ../setup/prometheus/grafana/grafana.yml
 kubectl delete -f ../setup/prometheus/prometheus.yml
 kubectl delete -f main.yml
 ```

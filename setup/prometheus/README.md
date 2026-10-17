@@ -1,24 +1,28 @@
-# Setup — Prometheus
+# Setup — Prometheus + Grafana
 
-Shared Prometheus Operator stack: scrape metrics about **all pods** in the cluster. Used by [lab4](../../lab4/).
+Shared Prometheus Operator stack: scrape metrics about **all pods** in the cluster, plus Grafana for dashboards. Used by [lab4](../../lab4/).
 
 ## Files
 
-| File | Purpose |
+| Path | Purpose |
 |------|---------|
 | [`prometheus.yml`](prometheus.yml) | Prometheus + kube-state-metrics + ServiceMonitors + Ingress + metrics-demo |
+| [`grafana/grafana.yml`](grafana/grafana.yml) | Grafana Deployment + datasource + Ingress |
+| [`grafana/dashboards/`](grafana/dashboards/) | Dashboard JSON — Cluster Pods, Pods by Namespace, Workload Pods |
 
 ## What this creates
 
 | Resource       | Name                 | Notes                                                |
 |----------------|----------------------|------------------------------------------------------|
-| Namespace      | `monitoring`         | Prometheus + kube-state-metrics                      |
+| Namespace      | `monitoring`         | Prometheus + kube-state-metrics + Grafana            |
 | Prometheus     | `prometheus`         | Scrapes all ServiceMonitors / PodMonitors + annotated pods |
 | Service/Ingress| `prometheus`         | UI at `http://prometheus.test.local`                 |
 | Deployment     | `kube-state-metrics` | Metrics **about every pod** (`kube_pod_*`)           |
 | ServiceMonitor | `kube-state-metrics` | Tells Prometheus to scrape kube-state-metrics        |
 | Deployment     | `metrics-demo`       | Tiny app with `/metrics` (annotation scrape demo)    |
 | ServiceMonitor | `metrics-demo`       | Scrapes the demo app                                 |
+| Deployment     | `grafana`            | Dashboards over Prometheus                           |
+| Service/Ingress| `grafana`            | UI at `http://grafana.test.local` (admin / admin)    |
 
 ## Architecture
 
@@ -27,12 +31,17 @@ flowchart LR
   Browser["Browser"]
   IC["ingress-nginx"]
   PromIng["Ingress<br/>prometheus.test.local"]
+  GrafIng["Ingress<br/>grafana.test.local"]
   Prom["Prometheus<br/>monitoring"]
+  Graf["Grafana"]
   KSM["kube-state-metrics"]
   Demo["metrics-demo<br/>/metrics"]
   AllPods["All cluster pods"]
 
-  Browser --> IC --> PromIng --> Prom
+  Browser --> IC
+  IC --> PromIng --> Prom
+  IC --> GrafIng --> Graf
+  Graf -->|query| Prom
   Prom -->|ServiceMonitor| KSM
   KSM -.->|watches| AllPods
   Prom -->|annotation SD + ServiceMonitor| Demo
@@ -69,7 +78,15 @@ From the repo root:
 
 ```bash
 kubectl apply -f setup/prometheus/prometheus.yml
+
+# Grafana — load JSON from grafana/dashboards/ then deploy
+kubectl create configmap grafana-dashboards -n monitoring \
+  --from-file=setup/prometheus/grafana/dashboards/ \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -f setup/prometheus/grafana/grafana.yml
 ```
+
+Add more boards by dropping `*.json` into `grafana/dashboards/`, then re-run the `kubectl create configmap …` command and `kubectl -n monitoring rollout restart deployment/grafana`.
 
 Check status:
 
@@ -79,18 +96,35 @@ kubectl get pods -n monitoring
 kubectl get pods -l app=metrics-demo
 ```
 
-Wait until Prometheus is ready:
+Wait until Prometheus and Grafana are ready:
 
 ```bash
 kubectl -n monitoring wait --for=condition=Available prometheus/prometheus --timeout=180s
 kubectl -n monitoring get pods -l app.kubernetes.io/name=prometheus
+kubectl -n monitoring wait --for=condition=Available deployment/grafana --timeout=120s
 ```
 
 ## Access
 
+Prometheus:
+
 ```
 http://prometheus.test.local
 ```
+
+Grafana (login `admin` / `admin`):
+
+```
+http://grafana.test.local
+```
+
+Provisioned dashboards:
+
+- **Cluster Pods** — overview of `kube_pod_*`
+- **Pods by Namespace — Resources** — filter by namespace/pod; CPU, memory, requests/limits, network, filesystem, restarts
+- **Workload Pods** — pick Deployment / StatefulSet / DaemonSet; lists its pods with CPU/memory/replicas
+
+Or build panels with the queries below.
 
 ### Useful queries (all pods)
 
@@ -117,6 +151,7 @@ Open **Status → Targets** and confirm:
 - `serviceMonitor/monitoring/kube-state-metrics` — UP
 - `serviceMonitor/default/metrics-demo` — UP
 - `kubernetes-pods` — UP for `metrics-demo` (annotation scrape)
+- `kubelet-cadvisor` — UP (real CPU / memory / network / FS usage)
 
 ## Enable scraping on your own pods
 
@@ -135,6 +170,8 @@ The container must serve Prometheus text format on that path/port.
 ## Cleanup
 
 ```bash
+kubectl delete configmap grafana-dashboards -n monitoring --ignore-not-found
+kubectl delete -f setup/prometheus/grafana/grafana.yml
 kubectl delete -f setup/prometheus/prometheus.yml
 ```
 

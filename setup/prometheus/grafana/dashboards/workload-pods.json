@@ -1,0 +1,592 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "count(\n  (\n    label_replace(kube_pod_owner{owner_kind=\"ReplicaSet\", namespace=~\"$namespace\"}, \"replicaset\", \"$1\", \"owner_name\", \"(.*)\")\n    * on(namespace, replicaset) group_left()\n    kube_replicaset_owner{owner_kind=~\"$type\", owner_name=~\"$workload\", namespace=~\"$namespace\"}\n  )\n  or\n  kube_pod_owner{owner_kind=~\"$type\", owner_name=~\"$workload\", namespace=~\"$namespace\"}\n) or vector(0)",
+          "legendFormat": "pods",
+          "refId": "A"
+        }
+      ],
+      "title": "Pods in workload",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(\n  rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\", container!=\"\", container!=\"POD\"}[5m])\n  * on(namespace, pod) group_left()\n  (\n    (\n      label_replace(kube_pod_owner{owner_kind=\"ReplicaSet\", namespace=~\"$namespace\"}, \"replicaset\", \"$1\", \"owner_name\", \"(.*)\")\n      * on(namespace, replicaset) group_left()\n      kube_replicaset_owner{owner_kind=~\"$type\", owner_name=~\"$workload\", namespace=~\"$namespace\"}\n    )\n    or on(namespace, pod)\n    kube_pod_owner{owner_kind=~\"$type\", owner_name=~\"$workload\", namespace=~\"$namespace\"}\n  )\n) or vector(0)",
+          "legendFormat": "CPU",
+          "refId": "A"
+        }
+      ],
+      "title": "CPU usage (cores)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "purple", "value": null }] },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(\n  container_memory_working_set_bytes{namespace=~\"$namespace\", container!=\"\", container!=\"POD\"}\n  * on(namespace, pod) group_left()\n  (\n    (\n      label_replace(kube_pod_owner{owner_kind=\"ReplicaSet\", namespace=~\"$namespace\"}, \"replicaset\", \"$1\", \"owner_name\", \"(.*)\")\n      * on(namespace, replicaset) group_left()\n      kube_replicaset_owner{owner_kind=~\"$type\", owner_name=~\"$workload\", namespace=~\"$namespace\"}\n    )\n    or on(namespace, pod)\n    kube_pod_owner{owner_kind=~\"$type\", owner_name=~\"$workload\", namespace=~\"$namespace\"}\n  )\n) or vector(0)",
+          "legendFormat": "Memory",
+          "refId": "A"
+        }
+      ],
+      "title": "Memory working set",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "orange", "value": null }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "(\n  kube_deployment_spec_replicas{namespace=~\"$namespace\", deployment=~\"$workload\"}\n  or\n  kube_statefulset_replicas{namespace=~\"$namespace\", statefulset=~\"$workload\"}\n  or\n  kube_daemonset_status_desired_number_scheduled{namespace=~\"$namespace\", daemonset=~\"$workload\"}\n) or vector(0)",
+          "legendFormat": "desired",
+          "refId": "A"
+        }
+      ],
+      "title": "Desired replicas",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "id": 5,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "(\n  kube_deployment_status_replicas_available{namespace=~\"$namespace\", deployment=~\"$workload\"}\n  or\n  kube_statefulset_status_replicas_ready{namespace=~\"$namespace\", statefulset=~\"$workload\"}\n  or\n  kube_daemonset_status_number_ready{namespace=~\"$namespace\", daemonset=~\"$workload\"}\n) or vector(0)",
+          "legendFormat": "available",
+          "refId": "A"
+        }
+      ],
+      "title": "Available / ready",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "id": 6,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(\n  kube_pod_container_status_restarts_total{namespace=~\"$namespace\"}\n  * on(namespace, pod) group_left()\n  (\n    (\n      label_replace(kube_pod_owner{owner_kind=\"ReplicaSet\", namespace=~\"$namespace\"}, \"replicaset\", \"$1\", \"owner_name\", \"(.*)\")\n      * on(namespace, replicaset) group_left()\n      kube_replicaset_owner{owner_kind=~\"$type\", owner_name=~\"$workload\", namespace=~\"$namespace\"}\n    )\n    or on(namespace, pod)\n    kube_pod_owner{owner_kind=~\"$type\", owner_name=~\"$workload\", namespace=~\"$namespace\"}\n  )\n) or vector(0)",
+          "legendFormat": "restarts",
+          "refId": "A"
+        }
+      ],
+      "title": "Restarts (total)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "auto" },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 4 },
+      "id": 10,
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "countRows": false, "fields": "", "reducer": ["sum"], "show": false },
+        "showHeader": true,
+        "sortBy": [{ "desc": false, "displayName": "pod" }]
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "(\n  label_replace(\n    label_replace(kube_pod_owner{owner_kind=\"ReplicaSet\", namespace=~\"$namespace\"}, \"replicaset\", \"$1\", \"owner_name\", \"(.*)\"),\n    \"workload\", \"$1\", \"replicaset\", \"(.*)\"\n  )\n  * on(namespace, replicaset) group_left()\n  kube_replicaset_owner{owner_kind=~\"$type\", owner_name=~\"$workload\", namespace=~\"$namespace\"}\n)\nor\nkube_pod_owner{owner_kind=~\"$type\", owner_name=~\"$workload\", namespace=~\"$namespace\"}",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "pod",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max by (namespace, pod, phase) (\n  kube_pod_status_phase{namespace=~\"$namespace\", phase=~\"Running|Pending|Failed|Succeeded|Unknown\"} == 1\n) * on(namespace, pod) group_left()\n(\n  (\n    label_replace(kube_pod_owner{owner_kind=\"ReplicaSet\", namespace=~\"$namespace\"}, \"replicaset\", \"$1\", \"owner_name\", \"(.*)\")\n    * on(namespace, replicaset) group_left()\n    kube_replicaset_owner{owner_kind=~\"$type\", owner_name=~\"$workload\", namespace=~\"$namespace\"}\n  )\n  or on(namespace, pod)\n  kube_pod_owner{owner_kind=~\"$type\", owner_name=~\"$workload\", namespace=~\"$namespace\"}\n)",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "phase",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (namespace, pod) (\n  rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\", container!=\"\", container!=\"POD\"}[5m])\n) * on(namespace, pod) group_left()\n(\n  (\n    label_replace(kube_pod_owner{owner_kind=\"ReplicaSet\", namespace=~\"$namespace\"}, \"replicaset\", \"$1\", \"owner_name\", \"(.*)\")\n    * on(namespace, replicaset) group_left()\n    kube_replicaset_owner{owner_kind=~\"$type\", owner_name=~\"$workload\", namespace=~\"$namespace\"}\n  )\n  or on(namespace, pod)\n  kube_pod_owner{owner_kind=~\"$type\", owner_name=~\"$workload\", namespace=~\"$namespace\"}\n)",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "cpu",
+          "refId": "C"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (namespace, pod) (\n  container_memory_working_set_bytes{namespace=~\"$namespace\", container!=\"\", container!=\"POD\"}\n) * on(namespace, pod) group_left()\n(\n  (\n    label_replace(kube_pod_owner{owner_kind=\"ReplicaSet\", namespace=~\"$namespace\"}, \"replicaset\", \"$1\", \"owner_name\", \"(.*)\")\n    * on(namespace, replicaset) group_left()\n    kube_replicaset_owner{owner_kind=~\"$type\", owner_name=~\"$workload\", namespace=~\"$namespace\"}\n  )\n  or on(namespace, pod)\n  kube_pod_owner{owner_kind=~\"$type\", owner_name=~\"$workload\", namespace=~\"$namespace\"}\n)",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "memory",
+          "refId": "D"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (namespace, pod) (\n  kube_pod_container_status_restarts_total{namespace=~\"$namespace\"}\n) * on(namespace, pod) group_left()\n(\n  (\n    label_replace(kube_pod_owner{owner_kind=\"ReplicaSet\", namespace=~\"$namespace\"}, \"replicaset\", \"$1\", \"owner_name\", \"(.*)\")\n    * on(namespace, replicaset) group_left()\n    kube_replicaset_owner{owner_kind=~\"$type\", owner_name=~\"$workload\", namespace=~\"$namespace\"}\n  )\n  or on(namespace, pod)\n  kube_pod_owner{owner_kind=~\"$type\", owner_name=~\"$workload\", namespace=~\"$namespace\"}\n)",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "restarts",
+          "refId": "E"
+        }
+      ],
+      "title": "Pods inside this workload",
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": { "byField": "pod", "mode": "outer" }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Time 1": true,
+              "Time 2": true,
+              "Time 3": true,
+              "Time 4": true,
+              "Time 5": true,
+              "Value #A": true,
+              "__name__": true,
+              "__name__ 1": true,
+              "container": true,
+              "endpoint": true,
+              "instance": true,
+              "job": true,
+              "namespace 2": true,
+              "namespace 3": true,
+              "namespace 4": true,
+              "namespace 5": true,
+              "owner_is_controller": true,
+              "owner_kind": true,
+              "owner_name": true,
+              "replicaset": true,
+              "service": true,
+              "uid": true,
+              "workload": true
+            },
+            "indexByName": {
+              "namespace 1": 0,
+              "pod": 1,
+              "phase": 2,
+              "Value #C": 3,
+              "Value #D": 4,
+              "Value #E": 5
+            },
+            "renameByName": {
+              "Value #C": "CPU usage",
+              "Value #D": "Memory",
+              "Value #E": "Restarts",
+              "namespace 1": "namespace",
+              "phase": "phase",
+              "pod": "pod"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 },
+      "id": 20,
+      "options": {
+        "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (pod) (\n  rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\", container!=\"\", container!=\"POD\"}[5m])\n  * on(namespace, pod) group_left()\n  (\n    (\n      label_replace(kube_pod_owner{owner_kind=\"ReplicaSet\", namespace=~\"$namespace\"}, \"replicaset\", \"$1\", \"owner_name\", \"(.*)\")\n      * on(namespace, replicaset) group_left()\n      kube_replicaset_owner{owner_kind=~\"$type\", owner_name=~\"$workload\", namespace=~\"$namespace\"}\n    )\n    or on(namespace, pod)\n    kube_pod_owner{owner_kind=~\"$type\", owner_name=~\"$workload\", namespace=~\"$namespace\"}\n  )\n)",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "CPU usage by pod (cores)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
+      "id": 21,
+      "options": {
+        "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (pod) (\n  container_memory_working_set_bytes{namespace=~\"$namespace\", container!=\"\", container!=\"POD\"}\n  * on(namespace, pod) group_left()\n  (\n    (\n      label_replace(kube_pod_owner{owner_kind=\"ReplicaSet\", namespace=~\"$namespace\"}, \"replicaset\", \"$1\", \"owner_name\", \"(.*)\")\n      * on(namespace, replicaset) group_left()\n      kube_replicaset_owner{owner_kind=~\"$type\", owner_name=~\"$workload\", namespace=~\"$namespace\"}\n    )\n    or on(namespace, pod)\n    kube_pod_owner{owner_kind=~\"$type\", owner_name=~\"$workload\", namespace=~\"$namespace\"}\n  )\n)",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Memory working set by pod",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "id": 22,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "(\n  kube_deployment_spec_replicas{namespace=~\"$namespace\", deployment=~\"$workload\"}\n  or\n  kube_statefulset_replicas{namespace=~\"$namespace\", statefulset=~\"$workload\"}\n  or\n  kube_daemonset_status_desired_number_scheduled{namespace=~\"$namespace\", daemonset=~\"$workload\"}\n)",
+          "legendFormat": "desired",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "(\n  kube_deployment_status_replicas_available{namespace=~\"$namespace\", deployment=~\"$workload\"}\n  or\n  kube_statefulset_status_replicas_ready{namespace=~\"$namespace\", statefulset=~\"$workload\"}\n  or\n  kube_daemonset_status_number_ready{namespace=~\"$namespace\", daemonset=~\"$workload\"}\n)",
+          "legendFormat": "available/ready",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "(\n  kube_deployment_status_replicas_unavailable{namespace=~\"$namespace\", deployment=~\"$workload\"}\n  or\n  kube_daemonset_status_number_unavailable{namespace=~\"$namespace\", daemonset=~\"$workload\"}\n)",
+          "legendFormat": "unavailable",
+          "refId": "C"
+        }
+      ],
+      "title": "Replicas desired / available",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "id": 23,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (pod) (\n  increase(kube_pod_container_status_restarts_total{namespace=~\"$namespace\"}[1h])\n  * on(namespace, pod) group_left()\n  (\n    (\n      label_replace(kube_pod_owner{owner_kind=\"ReplicaSet\", namespace=~\"$namespace\"}, \"replicaset\", \"$1\", \"owner_name\", \"(.*)\")\n      * on(namespace, replicaset) group_left()\n      kube_replicaset_owner{owner_kind=~\"$type\", owner_name=~\"$workload\", namespace=~\"$namespace\"}\n    )\n    or on(namespace, pod)\n    kube_pod_owner{owner_kind=~\"$type\", owner_name=~\"$workload\", namespace=~\"$namespace\"}\n  )\n)",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Restarts in last 1h (by pod)",
+      "type": "timeseries"
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["lab4", "workload", "deployment", "pods"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "default", "value": "default" },
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(kube_pod_info, namespace)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Namespace",
+        "multi": false,
+        "name": "namespace",
+        "options": [],
+        "query": { "qryType": 1, "query": "label_values(kube_pod_info, namespace)", "refId": "PrometheusVariableQueryEditor-VariableQuery" },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": { "selected": true, "text": "Deployment", "value": "Deployment" },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Type",
+        "multi": false,
+        "name": "type",
+        "options": [
+          { "selected": true, "text": "Deployment", "value": "Deployment" },
+          { "selected": false, "text": "StatefulSet", "value": "StatefulSet" },
+          { "selected": false, "text": "DaemonSet", "value": "DaemonSet" }
+        ],
+        "query": "Deployment,StatefulSet,DaemonSet",
+        "skipUrlSync": false,
+        "type": "custom"
+      },
+      {
+        "current": {},
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "query_result(group by (owner_name) (kube_replicaset_owner{owner_kind=~\"$type\", namespace=~\"$namespace\"} or kube_pod_owner{owner_kind=~\"$type\", namespace=~\"$namespace\"}))",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Workload",
+        "multi": false,
+        "name": "workload",
+        "options": [],
+        "query": {
+          "qryType": 3,
+          "query": "query_result(group by (owner_name) (kube_replicaset_owner{owner_kind=~\"$type\", namespace=~\"$namespace\"} or kube_pod_owner{owner_kind=~\"$type\", namespace=~\"$namespace\"}))",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 2,
+        "regex": "/owner_name=\"([^\"]+)\"/",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Workload Pods",
+  "uid": "workload-pods",
+  "version": 1,
+  "weekStart": ""
+}
