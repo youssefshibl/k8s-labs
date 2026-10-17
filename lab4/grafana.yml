@@ -1,17 +1,17 @@
 # =============================================================================
-# Lab 4 — Grafana (pairs with ../prometheus.yml)
+# Lab 4 — Grafana (pairs with prometheus.yml)
 # =============================================================================
 # Prerequisites:
 #   - Prometheus stack applied (lab4/prometheus.yml)
 #   - ingress-nginx + *.test.local DNS
 #
 # Apply (from repo root — ConfigMap first so the Deployment can mount it).
-# Core boards: lab4/grafana/dashboards/ (3 boards).
+# Core boards: lab4/dashboards/ (3 boards).
 # MongoDB / PostgreSQL boards are optional (lab5) via separate ConfigMaps
 # (avoids kubectl apply annotation size limit).
 #
 #   kubectl create configmap grafana-dashboards -n monitoring \
-#     --from-file=lab4/grafana/dashboards/ \
+#     --from-file=lab4/dashboards/ \
 #     --dry-run=client -o yaml | kubectl apply -f -
 #   # optional — lab5:
 #   kubectl create configmap grafana-dashboards-mongodb -n monitoring \
@@ -20,7 +20,7 @@
 #   kubectl create configmap grafana-dashboards-postgresql -n monitoring \
 #     --from-file=lab5/postgresql/dashboards/ \
 #     --dry-run=client -o yaml | kubectl apply -f -
-#   kubectl apply -f lab4/grafana/grafana.yml
+#   kubectl apply -f lab4/grafana.yml
 #
 # UI: http://grafana.test.local  (admin / admin)
 #

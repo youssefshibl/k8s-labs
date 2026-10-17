@@ -82,9 +82,9 @@ kubectl apply -f setup/local-ca.yml
 # Prometheus + Grafana (lab4) — after prometheus-operator bundle is installed
 kubectl apply -f lab4/prometheus.yml
 kubectl create configmap grafana-dashboards -n monitoring \
-  --from-file=lab4/grafana/dashboards/ \
+  --from-file=lab4/dashboards/ \
   --dry-run=client -o yaml | kubectl apply -f -
-kubectl apply -f lab4/grafana/grafana.yml
+kubectl apply -f lab4/grafana.yml
 
 # lab5 — MongoDB / PostgreSQL exporters + DB dashboards
 # see lab5/README.md

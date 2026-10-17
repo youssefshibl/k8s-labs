@@ -9,8 +9,8 @@ Database exporters (MongoDB / PostgreSQL): see **[lab5](../lab5/)**.
 | Path | Purpose |
 |------|---------|
 | [`prometheus.yml`](prometheus.yml) | Namespace, RBAC, Prometheus CR, kube-state-metrics, ServiceMonitors, Ingress, metrics-demo |
-| [`grafana/grafana.yml`](grafana/grafana.yml) | Grafana + Prometheus datasource + Ingress |
-| [`grafana/dashboards/`](grafana/dashboards/) | **Cluster Pods**, **Pods by Namespace**, **Workload Pods** |
+| [`grafana.yml`](grafana.yml) | Grafana + Prometheus datasource + Ingress |
+| [`dashboards/`](dashboards/) | **Cluster Pods**, **Pods by Namespace**, **Workload Pods** |
 
 ## What this creates
 
@@ -84,9 +84,9 @@ kubectl apply -f prometheus.yml
 
 # 2) Grafana — load the 3 dashboard JSON files, then deploy
 kubectl create configmap grafana-dashboards -n monitoring \
-  --from-file=grafana/dashboards/ \
+  --from-file=dashboards/ \
   --dry-run=client -o yaml | kubectl apply -f -
-kubectl apply -f grafana/grafana.yml
+kubectl apply -f grafana.yml
 ```
 
 From **repo root**:
@@ -94,9 +94,9 @@ From **repo root**:
 ```bash
 kubectl apply -f lab4/prometheus.yml
 kubectl create configmap grafana-dashboards -n monitoring \
-  --from-file=lab4/grafana/dashboards/ \
+  --from-file=lab4/dashboards/ \
   --dry-run=client -o yaml | kubectl apply -f -
-kubectl apply -f lab4/grafana/grafana.yml
+kubectl apply -f lab4/grafana.yml
 ```
 
 Wait until ready:
@@ -123,7 +123,7 @@ kubectl get pods -l app=metrics-demo
 | **Pods by Namespace — Resources** | Filter by namespace/pod; CPU, memory, requests/limits, network, FS, restarts |
 | **Workload Pods** | Pick Deployment / StatefulSet / DaemonSet; pods with CPU/memory/replicas |
 
-Add more boards by dropping `*.json` into `grafana/dashboards/`, re-create the ConfigMap, then:
+Add more boards by dropping `*.json` into `dashboards/`, re-create the ConfigMap, then:
 
 ```bash
 kubectl -n monitoring rollout restart deployment/grafana
@@ -165,7 +165,7 @@ The container must serve Prometheus text format on that path/port.
 
 ```bash
 kubectl delete configmap grafana-dashboards -n monitoring --ignore-not-found
-kubectl delete -f grafana/grafana.yml
+kubectl delete -f grafana.yml
 kubectl delete -f prometheus.yml
 ```
 

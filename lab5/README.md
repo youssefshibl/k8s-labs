@@ -45,9 +45,9 @@ flowchart LR
 # if not already applied (lab4)
 kubectl apply -f ../lab4/prometheus.yml
 kubectl create configmap grafana-dashboards -n monitoring \
-  --from-file=../lab4/grafana/dashboards/ \
+  --from-file=../lab4/dashboards/ \
   --dry-run=client -o yaml | kubectl apply -f -
-kubectl apply -f ../lab4/grafana/grafana.yml
+kubectl apply -f ../lab4/grafana.yml
 ```
 
 ## Apply
