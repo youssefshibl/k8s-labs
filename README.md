@@ -7,7 +7,8 @@ Local Kubernetes labs on kind (`kind-dev`) with MetalLB + nginx Ingress.
 | [lab1](lab1/) | Test nginx Deployment, Service & Ingress |
 | [lab2](lab2/) | Web app (mongo-express) connected to MongoDB |
 | [lab3](lab3/) | Stateful MongoDB + TLS via cert-manager (`test-web.test.local`) |
-| [lab4](lab4/) | Lab2 stack + Prometheus Operator (metrics for all pods) |
+| [lab4](lab4/) | Prometheus + Grafana for Kubernetes (3 pod/workload dashboards) |
+| [lab5](lab5/) | MongoDB & PostgreSQL exporters + Grafana DB dashboards |
 
 ## Architecture overview
 
@@ -18,7 +19,6 @@ flowchart TB
     LB["MetalLB"]
     IC["ingress-nginx"]
     CM["cert-manager + setup/ local CA"]
-    Prom["setup/prometheus/"]
   end
 
   subgraph lab1 [Lab 1]
@@ -45,18 +45,23 @@ flowchart TB
   end
 
   subgraph lab4 [Lab 4]
-    L4Ing["Ingress test-web"]
-    L4Web["mongo-express + mongodb<br/>same as lab2"]
-    L4Ing --> L4Web
+    Prom["Prometheus + Grafana<br/>kube-state-metrics"]
+    Boards["3 dashboards<br/>cluster / namespace / workload"]
+    Prom --> Boards
+  end
+
+  subgraph lab5 [Lab 5]
+    L5Mongo["mongodb + mongodb-exporter"]
+    L5PG["postgresql + postgres-exporter"]
+    L5Mongo --> Prom
+    L5PG --> Prom
   end
 
   DNS --> LB --> IC
   IC --> L1Ing
   IC --> L2Ing
   IC --> L3Ing
-  IC --> L4Ing
   CM -.-> L3Ing
-  Prom -.->|metrics about| L4Web
 ```
 
 ## Setup (shared)
@@ -66,28 +71,30 @@ One-time / shared cluster pieces used by labs:
 | Path | Purpose |
 |------|---------|
 | [setup/local-ca.yml](setup/local-ca.yml) | Local CA + `labs-ca-issuer` (cert-manager) — lab3, dashboard |
-| [setup/prometheus/](setup/prometheus/) | Prometheus + Grafana — [README](setup/prometheus/README.md) (lab4) |
 | [setup/dashboard/](setup/dashboard/) | Kubernetes Dashboard Ingress — [README](setup/dashboard/README.md) |
+
+Prometheus + Grafana live in **[lab4](lab4/)** (not under `setup/`).
 
 ```bash
 # after cert-manager is installed (lab3 TLS / dashboard TLS)
 kubectl apply -f setup/local-ca.yml
 
-# after prometheus-operator bundle is installed (lab4)
-kubectl apply -f setup/prometheus/prometheus.yml
+# Prometheus + Grafana (lab4) — after prometheus-operator bundle is installed
+kubectl apply -f lab4/prometheus.yml
 kubectl create configmap grafana-dashboards -n monitoring \
-  --from-file=setup/prometheus/grafana/dashboards/ \
-  --from-file=setup/prometheus/mongodb/dashboards/ \
+  --from-file=lab4/grafana/dashboards/ \
   --dry-run=client -o yaml | kubectl apply -f -
-kubectl apply -f setup/prometheus/grafana/grafana.yml
-# optional MongoDB metrics: setup/prometheus/mongodb/
+kubectl apply -f lab4/grafana/grafana.yml
+
+# lab5 — MongoDB / PostgreSQL exporters + DB dashboards
+# see lab5/README.md
 
 # dashboard UI (after Dashboard + local CA are installed)
 kubectl apply -f setup/dashboard/admin-user.yml
 kubectl apply -f setup/dashboard/ingress.yml
 ```
 
-See [setup/README.md](setup/README.md) for CA trust, Prometheus, and Dashboard details.
+See [setup/README.md](setup/README.md) for CA trust and Dashboard details.
 
 ---
 

@@ -1,17 +1,17 @@
 # =============================================================================
-# Setup — MongoDB exporter (pairs with lab2 / lab4 mongodb)
+# Lab 5 — MongoDB exporter
 # =============================================================================
 # Prerequisites:
-#   - MongoDB running in default (lab2/lab4 main.yml) with Secret mongodb-secret
-#   - Prometheus Operator stack (../prometheus.yml)
+#   - lab5/mongodb/mongodb.yml applied (Secret mongodb-secret + Service mongodb)
+#   - Prometheus Operator stack (lab4/)
 #
 # Apply (from repo root):
-#   kubectl apply -f setup/prometheus/mongodb/mongodb-exporter.yml
+#   kubectl apply -f lab5/mongodb/mongodb.yml
+#   kubectl apply -f lab5/mongodb/mongodb-exporter.yml
 #
-# Then reload Grafana dashboards (includes this board + grafana/dashboards/):
-#   kubectl create configmap grafana-dashboards -n monitoring \
-#     --from-file=setup/prometheus/grafana/dashboards/ \
-#     --from-file=setup/prometheus/mongodb/dashboards/ \
+# Grafana board:
+#   kubectl create configmap grafana-dashboards-mongodb -n monitoring \
+#     --from-file=lab5/mongodb/dashboards/ \
 #     --dry-run=client -o yaml | kubectl apply -f -
 #   kubectl -n monitoring rollout restart deployment/grafana
 #
@@ -23,7 +23,6 @@
 # -----------------------------------------------------------------------------
 # BLOCK 1 — Secret: MongoDB URI for the exporter
 # Must match credentials in mongodb-secret (lab defaults: admin / changeme).
-# URI targets the in-cluster mongodb Service in default.
 # -----------------------------------------------------------------------------
 apiVersion: v1
 kind: Secret
@@ -38,7 +37,6 @@ stringData:
 ---
 # -----------------------------------------------------------------------------
 # BLOCK 2 — Deployment: mongodb-exporter
-# Scrapes MongoDB serverStatus / WiredTiger / dbStats and exposes /metrics.
 # -----------------------------------------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
@@ -107,8 +105,7 @@ spec:
             periodSeconds: 20
 ---
 # -----------------------------------------------------------------------------
-# BLOCK 3 — Service for mongodb-exporter
-# Named port "metrics" for the ServiceMonitor below.
+# BLOCK 3 — Service: mongodb-exporter
 # -----------------------------------------------------------------------------
 apiVersion: v1
 kind: Service
@@ -128,7 +125,6 @@ spec:
 ---
 # -----------------------------------------------------------------------------
 # BLOCK 4 — ServiceMonitor: scrape mongodb-exporter
-# Prometheus (serviceMonitorNamespaceSelector: {}) picks this up cluster-wide.
 # -----------------------------------------------------------------------------
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor

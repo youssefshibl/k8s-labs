@@ -1,27 +1,36 @@
 # =============================================================================
-# Setup — Grafana (pairs with ../prometheus.yml)
+# Lab 4 — Grafana (pairs with ../prometheus.yml)
 # =============================================================================
 # Prerequisites:
-#   - Prometheus stack applied (setup/prometheus/prometheus.yml)
+#   - Prometheus stack applied (lab4/prometheus.yml)
 #   - ingress-nginx + *.test.local DNS
 #
-# Apply (from repo root — ConfigMap first so the Deployment can mount it):
+# Apply (from repo root — ConfigMap first so the Deployment can mount it).
+# Core boards: lab4/grafana/dashboards/ (3 boards).
+# MongoDB / PostgreSQL boards are optional (lab5) via separate ConfigMaps
+# (avoids kubectl apply annotation size limit).
+#
 #   kubectl create configmap grafana-dashboards -n monitoring \
-#     --from-file=setup/prometheus/grafana/dashboards/ \
-#     --from-file=setup/prometheus/mongodb/dashboards/ \
+#     --from-file=lab4/grafana/dashboards/ \
 #     --dry-run=client -o yaml | kubectl apply -f -
-#   kubectl apply -f setup/prometheus/grafana/grafana.yml
+#   # optional — lab5:
+#   kubectl create configmap grafana-dashboards-mongodb -n monitoring \
+#     --from-file=lab5/mongodb/dashboards/ \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl create configmap grafana-dashboards-postgresql -n monitoring \
+#     --from-file=lab5/postgresql/dashboards/ \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl apply -f lab4/grafana/grafana.yml
 #
 # UI: http://grafana.test.local  (admin / admin)
 #
-# Dashboard JSON files live in ./dashboards/ and ../mongodb/dashboards/ —
-# add more *.json there, re-run the create configmap command, then:
+# Re-run the matching create configmap command after editing JSON, then:
 #   kubectl -n monitoring rollout restart deployment/grafana
 #
 # What this file deploys:
 #   1) ConfigMap — Prometheus datasource (auto-provisioned)
 #   2) ConfigMap — dashboard provider (loads /etc/grafana/dashboards)
-#   3) Deployment — Grafana
+#   3) Deployment — Grafana (projected volume merges dashboard ConfigMaps)
 #   4) Service + Ingress
 # =============================================================================
 
@@ -52,8 +61,7 @@ data:
 # -----------------------------------------------------------------------------
 # BLOCK 2 — ConfigMap: dashboard provider
 # Tells Grafana to load JSON boards from /etc/grafana/dashboards.
-# The boards themselves come from ConfigMap grafana-dashboards
-# (created from ./dashboards/ — see header comments).
+# Boards come from projected ConfigMaps (see Deployment volumes + header).
 # -----------------------------------------------------------------------------
 apiVersion: v1
 kind: ConfigMap
@@ -79,6 +87,7 @@ data:
 # BLOCK 3 — Deployment: Grafana
 # Mounts provisioning ConfigMaps; uses emptyDir for ephemeral lab storage.
 # Login: admin / admin (lab only — change for anything shared).
+# Dashboards: projected volume merges grafana-dashboards (+ optional mongo/pg).
 # -----------------------------------------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
@@ -149,8 +158,16 @@ spec:
           configMap:
             name: grafana-dashboard-provider
         - name: dashboards
-          configMap:
-            name: grafana-dashboards
+          projected:
+            sources:
+              - configMap:
+                  name: grafana-dashboards
+              - configMap:
+                  name: grafana-dashboards-mongodb
+                  optional: true
+              - configMap:
+                  name: grafana-dashboards-postgresql
+                  optional: true
         - name: storage
           emptyDir: {}
 ---

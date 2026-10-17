@@ -1,30 +1,30 @@
-# Lab 4 — Web App + MongoDB + Prometheus Operator
+# Lab 4 — Prometheus + Grafana for Kubernetes
 
-Same app stack as [lab2](../lab2/) (mongo-express + MongoDB), plus the shared Prometheus stack under [`setup/prometheus/`](../setup/prometheus/).
+Configure **Prometheus Operator**, **Prometheus**, and **Grafana** on your kind cluster to scrape metrics about pods and workloads, with three provisioned dashboards.
+
+Database exporters (MongoDB / PostgreSQL): see **[lab5](../lab5/)**.
 
 ## Files
 
-| File | Purpose |
+| Path | Purpose |
 |------|---------|
-| [`main.yml`](main.yml) | Same as lab2 — Secret, MongoDB, test-web, Ingress |
-| [`../setup/prometheus/`](../setup/prometheus/) | Shared setup — Prometheus Operator stack (see its README) |
+| [`prometheus.yml`](prometheus.yml) | Namespace, RBAC, Prometheus CR, kube-state-metrics, ServiceMonitors, Ingress, metrics-demo |
+| [`grafana/grafana.yml`](grafana/grafana.yml) | Grafana + Prometheus datasource + Ingress |
+| [`grafana/dashboards/`](grafana/dashboards/) | **Cluster Pods**, **Pods by Namespace**, **Workload Pods** |
 
 ## What this creates
 
-### From `main.yml` (lab2)
-
-| Resource   | Name             | Notes                                              |
-|------------|------------------|----------------------------------------------------|
-| Secret     | `mongodb-secret` | MongoDB username / password / database             |
-| Deployment | `mongodb`        | 1 replica, `mongo:7.0`                             |
-| Service    | `mongodb`        | ClusterIP, port 27017                              |
-| Deployment | `test-web`       | 2 replicas, `mongo-express` → connects to MongoDB  |
-| Service    | `test-web`       | ClusterIP, port 80 → 8081                          |
-| Ingress    | `test-web`       | host `test-web.test.local`, class `nginx`          |
-
-### From `setup/prometheus/`
-
-Prometheus, Grafana, kube-state-metrics, ServiceMonitors, and Ingress — full list in [`setup/prometheus/README.md`](../setup/prometheus/README.md).
+| Resource       | Name                 | Notes                                                |
+|----------------|----------------------|------------------------------------------------------|
+| Namespace      | `monitoring`         | Prometheus + kube-state-metrics + Grafana            |
+| Prometheus     | `prometheus`         | Scrapes ServiceMonitors / PodMonitors + annotated pods |
+| Service/Ingress| `prometheus`         | UI at `http://prometheus.test.local`                 |
+| Deployment     | `kube-state-metrics` | Metrics **about every pod** (`kube_pod_*`)           |
+| ServiceMonitor | `kube-state-metrics` | Tells Prometheus to scrape kube-state-metrics        |
+| Deployment     | `metrics-demo`       | Tiny app with `/metrics` (annotation scrape demo)    |
+| ServiceMonitor | `metrics-demo`       | Scrapes the demo app                                 |
+| Deployment     | `grafana`            | Dashboards over Prometheus                           |
+| Service/Ingress| `grafana`            | UI at `http://grafana.test.local` (admin / admin)    |
 
 ## Architecture
 
@@ -32,89 +32,146 @@ Prometheus, Grafana, kube-state-metrics, ServiceMonitors, and Ingress — full l
 flowchart LR
   Browser["Browser"]
   IC["ingress-nginx"]
-  WebIng["Ingress<br/>test-web.test.local"]
   PromIng["Ingress<br/>prometheus.test.local"]
   GrafIng["Ingress<br/>grafana.test.local"]
-  Web["test-web + mongodb<br/>main.yml"]
-  Prom["Prometheus<br/>setup/prometheus/"]
+  Prom["Prometheus<br/>monitoring"]
   Graf["Grafana"]
+  KSM["kube-state-metrics"]
+  Demo["metrics-demo<br/>/metrics"]
+  AllPods["All cluster pods"]
 
   Browser --> IC
-  IC --> WebIng --> Web
   IC --> PromIng --> Prom
   IC --> GrafIng --> Graf
   Graf -->|query| Prom
-  Prom -.->|metrics about| Web
+  Prom -->|ServiceMonitor| KSM
+  KSM -.->|watches| AllPods
+  Prom -->|annotation SD + ServiceMonitor| Demo
 ```
 
-## Prerequisites
+## How Prometheus gets data from all pods
 
-Same as lab1 / lab2:
+1. **kube-state-metrics** watches the Kubernetes API and exports metrics for every pod (`kube_pod_info`, `kube_pod_status_phase`, `kube_pod_container_status_restarts_total`, …).
+2. A **ServiceMonitor** points Prometheus at kube-state-metrics.
+3. **Annotation scrape** (extra job in `additional-scrape-configs`): any pod with `prometheus.io/scrape: "true"` is scraped (see `metrics-demo`). Optional annotations: `prometheus.io/port`, `prometheus.io/path`.
+
+## Prerequisites
 
 - kind cluster (`kind-dev`)
 - ingress-nginx controller
 - MetalLB (LoadBalancer EXTERNAL-IP)
 - Wildcard DNS for `*.test.local` (dnsmasq)
 
-Plus Prometheus Operator — see [`setup/prometheus/README.md`](../setup/prometheus/README.md).
+Plus the **Prometheus Operator** CRDs + controller (once per cluster):
+
+```bash
+kubectl apply --server-side -f \
+  https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.78.2/bundle.yaml
+
+kubectl wait --for=condition=Available deployment/prometheus-operator \
+  -n default --timeout=120s
+```
+
+> The upstream `bundle.yaml` installs the operator into the `default` namespace. That is fine for local labs.
 
 ## Apply
 
-```bash
-# 1) App stack (same as lab2)
-kubectl apply -f main.yml
+From **lab4/** (or use paths from the repo root):
 
-# 2) Prometheus + Grafana (shared setup)
-kubectl apply -f ../setup/prometheus/prometheus.yml
+```bash
+# 1) Prometheus Operator stack
+kubectl apply -f prometheus.yml
+
+# 2) Grafana — load the 3 dashboard JSON files, then deploy
 kubectl create configmap grafana-dashboards -n monitoring \
-  --from-file=../setup/prometheus/grafana/dashboards/ \
-  --from-file=../setup/prometheus/mongodb/dashboards/ \
+  --from-file=grafana/dashboards/ \
   --dry-run=client -o yaml | kubectl apply -f -
-kubectl apply -f ../setup/prometheus/grafana/grafana.yml
-
-# 3) MongoDB metrics exporter + Grafana board
-kubectl apply -f ../setup/prometheus/mongodb/mongodb-exporter.yml
+kubectl apply -f grafana/grafana.yml
 ```
 
-MongoDB exporter details: [`setup/prometheus/mongodb/README.md`](../setup/prometheus/mongodb/README.md).
-
-Check app:
+From **repo root**:
 
 ```bash
-kubectl get deploy,svc,ingress -l 'app in (mongodb,test-web)'
-kubectl get pods -l 'app in (mongodb,test-web)'
+kubectl apply -f lab4/prometheus.yml
+kubectl create configmap grafana-dashboards -n monitoring \
+  --from-file=lab4/grafana/dashboards/ \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -f lab4/grafana/grafana.yml
 ```
 
-Prometheus / Grafana status, queries, and targets: [`setup/prometheus/README.md`](../setup/prometheus/README.md).
+Wait until ready:
+
+```bash
+kubectl -n monitoring wait --for=condition=Available prometheus/prometheus --timeout=180s
+kubectl -n monitoring wait --for=condition=Available deployment/grafana --timeout=120s
+kubectl get pods -n monitoring
+kubectl get pods -l app=metrics-demo
+```
 
 ## Access
 
-App:
+| UI | URL | Login |
+|----|-----|-------|
+| Prometheus | http://prometheus.test.local | — |
+| Grafana | http://grafana.test.local | `admin` / `admin` |
 
-```
-http://test-web.test.local
+### The 3 dashboards
+
+| Dashboard | What it shows |
+|-----------|----------------|
+| **Cluster Pods** | Overview of `kube_pod_*` across the cluster |
+| **Pods by Namespace — Resources** | Filter by namespace/pod; CPU, memory, requests/limits, network, FS, restarts |
+| **Workload Pods** | Pick Deployment / StatefulSet / DaemonSet; pods with CPU/memory/replicas |
+
+Add more boards by dropping `*.json` into `grafana/dashboards/`, re-create the ConfigMap, then:
+
+```bash
+kubectl -n monitoring rollout restart deployment/grafana
 ```
 
-Prometheus UI:
+### Useful queries
 
-```
-http://prometheus.test.local
+In Prometheus → **Graph**:
+
+```promql
+kube_pod_info
+kube_pod_status_phase
+kube_pod_container_status_restarts_total
+version   # metrics-demo custom metric
 ```
 
-Grafana UI (`admin` / `admin`):
+### Targets
 
+Open Prometheus → **Status → Targets** and confirm:
+
+- `serviceMonitor/monitoring/kube-state-metrics` — UP
+- `serviceMonitor/default/metrics-demo` — UP
+- `kubernetes-pods` — UP for `metrics-demo` (annotation scrape)
+- `kubelet-cadvisor` — UP (real CPU / memory / network / FS usage)
+
+## Enable scraping on your own pods
+
+```yaml
+metadata:
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
 ```
-http://grafana.test.local
-```
+
+The container must serve Prometheus text format on that path/port.
 
 ## Cleanup
 
 ```bash
-kubectl delete -f ../setup/prometheus/mongodb/mongodb-exporter.yml --ignore-not-found
 kubectl delete configmap grafana-dashboards -n monitoring --ignore-not-found
-kubectl delete -f ../setup/prometheus/grafana/grafana.yml
-kubectl delete -f ../setup/prometheus/prometheus.yml
-kubectl delete -f main.yml
+kubectl delete -f grafana/grafana.yml
+kubectl delete -f prometheus.yml
 ```
 
-Optional — remove the operator: see [`setup/prometheus/README.md`](../setup/prometheus/README.md).
+Optional — remove the Prometheus Operator:
+
+```bash
+kubectl delete -f \
+  https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.78.2/bundle.yaml
+```

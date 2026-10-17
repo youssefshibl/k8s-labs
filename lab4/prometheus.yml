@@ -6,7 +6,7 @@
 #     https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.78.2/bundle.yaml
 #
 # Then apply this file (from repo root):
-#   kubectl apply -f setup/prometheus/prometheus.yml
+#   kubectl apply -f lab4/prometheus.yml
 #
 # What this file deploys (in order):
 #   1) monitoring Namespace

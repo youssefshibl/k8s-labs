@@ -5,8 +5,9 @@ Shared cluster pieces used by more than one lab.
 | Path | Purpose | Used by |
 |------|---------|---------|
 | [`local-ca.yml`](local-ca.yml) | Local CA + `labs-ca-issuer` (cert-manager) | lab3, dashboard |
-| [`prometheus/`](prometheus/) | Prometheus + Grafana + kube-state-metrics + Ingress | lab4 |
 | [`dashboard/`](dashboard/) | Kubernetes Dashboard Ingress + admin-user | cluster UI |
+
+Prometheus + Grafana: **[lab4](../lab4/)** (used by lab4 and lab5).
 
 ---
 
@@ -119,7 +120,7 @@ sudo update-ca-certificates
 
 # Prometheus + Grafana
 
-See [`prometheus/README.md`](prometheus/README.md).
+See **[lab4/README.md](../lab4/README.md)**.
 
 ---
 

@@ -1,0 +1,225 @@
+# =============================================================================
+# Lab 5 — PostgreSQL + postgres_exporter (lab DB + metrics)
+# =============================================================================
+# Prerequisites:
+#   - Prometheus Operator stack (lab4/)
+#
+# Apply (from repo root):
+#   kubectl apply -f lab5/postgresql/postgres-exporter.yml
+#
+# Grafana board:
+#   kubectl create configmap grafana-dashboards-postgresql -n monitoring \
+#     --from-file=lab5/postgresql/dashboards/ \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl -n monitoring rollout restart deployment/grafana
+#
+# Metrics: http://postgres-exporter.default.svc:9187/metrics
+# Dashboard: Grafana → "PostgreSQL Database" (grafana.com/9628, adapted for Grafana 11)
+# Exporter: prometheuscommunity/postgres-exporter
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# BLOCK 1 — Secret: PostgreSQL credentials + exporter DSN
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgresql
+  namespace: default
+  labels:
+    app: postgresql
+type: Opaque
+stringData:
+  POSTGRES_USER: app
+  POSTGRES_PASSWORD: changeme
+  POSTGRES_DB: appdb
+  # Used by postgres-exporter (DATA_SOURCE_NAME)
+  data-source-name: postgresql://app:changeme@postgresql.default.svc:5432/appdb?sslmode=disable
+---
+# -----------------------------------------------------------------------------
+# BLOCK 2 — Deployment: PostgreSQL (lab database)
+# -----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgresql
+  namespace: default
+  labels:
+    app: postgresql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgresql
+  template:
+    metadata:
+      labels:
+        app: postgresql
+    spec:
+      containers:
+        - name: postgresql
+          image: postgres:16-alpine
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql
+                  key: POSTGRES_DB
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "app", "-d", "appdb"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "app", "-d", "appdb"]
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+# -----------------------------------------------------------------------------
+# BLOCK 3 — Service: PostgreSQL
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql
+  namespace: default
+  labels:
+    app: postgresql
+spec:
+  type: ClusterIP
+  selector:
+    app: postgresql
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+# -----------------------------------------------------------------------------
+# BLOCK 4 — Deployment: postgres-exporter
+# -----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-exporter
+  namespace: default
+  labels:
+    app: postgres-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-exporter
+  template:
+    metadata:
+      labels:
+        app: postgres-exporter
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9187"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: postgres-exporter
+          image: quay.io/prometheuscommunity/postgres-exporter:v0.20.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - --web.listen-address=:9187
+          env:
+            - name: DATA_SOURCE_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql
+                  key: data-source-name
+          ports:
+            - name: metrics
+              containerPort: 9187
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: metrics
+            initialDelaySeconds: 15
+            periodSeconds: 20
+---
+# -----------------------------------------------------------------------------
+# BLOCK 5 — Service: postgres-exporter
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-exporter
+  namespace: default
+  labels:
+    app: postgres-exporter
+spec:
+  type: ClusterIP
+  selector:
+    app: postgres-exporter
+  ports:
+    - name: metrics
+      port: 9187
+      targetPort: metrics
+---
+# -----------------------------------------------------------------------------
+# BLOCK 6 — ServiceMonitor: scrape postgres-exporter
+# -----------------------------------------------------------------------------
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: postgres-exporter
+  namespace: default
+  labels:
+    app: postgres-exporter
+spec:
+  selector:
+    matchLabels:
+      app: postgres-exporter
+  namespaceSelector:
+    matchNames:
+      - default
+  endpoints:
+    - port: metrics
+      interval: 15s
+      path: /metrics
+      scrapeTimeout: 10s
