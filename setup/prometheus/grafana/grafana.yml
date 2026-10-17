@@ -8,13 +8,14 @@
 # Apply (from repo root — ConfigMap first so the Deployment can mount it):
 #   kubectl create configmap grafana-dashboards -n monitoring \
 #     --from-file=setup/prometheus/grafana/dashboards/ \
+#     --from-file=setup/prometheus/mongodb/dashboards/ \
 #     --dry-run=client -o yaml | kubectl apply -f -
 #   kubectl apply -f setup/prometheus/grafana/grafana.yml
 #
 # UI: http://grafana.test.local  (admin / admin)
 #
-# Dashboard JSON files live in ./dashboards/ — add more *.json there,
-# re-run the create configmap command, then:
+# Dashboard JSON files live in ./dashboards/ and ../mongodb/dashboards/ —
+# add more *.json there, re-run the create configmap command, then:
 #   kubectl -n monitoring rollout restart deployment/grafana
 #
 # What this file deploys:

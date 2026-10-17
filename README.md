@@ -77,8 +77,10 @@ kubectl apply -f setup/local-ca.yml
 kubectl apply -f setup/prometheus/prometheus.yml
 kubectl create configmap grafana-dashboards -n monitoring \
   --from-file=setup/prometheus/grafana/dashboards/ \
+  --from-file=setup/prometheus/mongodb/dashboards/ \
   --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -f setup/prometheus/grafana/grafana.yml
+# optional MongoDB metrics: setup/prometheus/mongodb/
 
 # dashboard UI (after Dashboard + local CA are installed)
 kubectl apply -f setup/dashboard/admin-user.yml

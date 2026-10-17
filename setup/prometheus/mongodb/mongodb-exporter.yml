@@ -1,0 +1,151 @@
+# =============================================================================
+# Setup — MongoDB exporter (pairs with lab2 / lab4 mongodb)
+# =============================================================================
+# Prerequisites:
+#   - MongoDB running in default (lab2/lab4 main.yml) with Secret mongodb-secret
+#   - Prometheus Operator stack (../prometheus.yml)
+#
+# Apply (from repo root):
+#   kubectl apply -f setup/prometheus/mongodb/mongodb-exporter.yml
+#
+# Then reload Grafana dashboards (includes this board + grafana/dashboards/):
+#   kubectl create configmap grafana-dashboards -n monitoring \
+#     --from-file=setup/prometheus/grafana/dashboards/ \
+#     --from-file=setup/prometheus/mongodb/dashboards/ \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl -n monitoring rollout restart deployment/grafana
+#
+# Metrics: http://mongodb-exporter.default.svc:9216/metrics
+# Dashboard: Grafana → "MongoDB — Prod Overview" (id 25227)
+# Exporter: ghcr.io/gurjarchetan/mongodb-exporter (matches dashboard 25227)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# BLOCK 1 — Secret: MongoDB URI for the exporter
+# Must match credentials in mongodb-secret (lab defaults: admin / changeme).
+# URI targets the in-cluster mongodb Service in default.
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mongodb-exporter
+  namespace: default
+  labels:
+    app: mongodb-exporter
+type: Opaque
+stringData:
+  mongodb-uri: mongodb://admin:changeme@mongodb.default.svc:27017/admin?authSource=admin
+---
+# -----------------------------------------------------------------------------
+# BLOCK 2 — Deployment: mongodb-exporter
+# Scrapes MongoDB serverStatus / WiredTiger / dbStats and exposes /metrics.
+# -----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongodb-exporter
+  namespace: default
+  labels:
+    app: mongodb-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongodb-exporter
+  template:
+    metadata:
+      labels:
+        app: mongodb-exporter
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9216"
+        prometheus.io/path: "/metrics"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        fsGroup: 65534
+      containers:
+        - name: mongodb-exporter
+          image: ghcr.io/gurjarchetan/mongodb-exporter:v1.0.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - --web.listen-address=:9216
+            - --collector.dbstats=true
+            - --collector.replication=true
+            - --collector.currentop=false
+            - --collector.profile=true
+            - --collector.collstats=false
+            - --log.level=info
+          env:
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: mongodb-exporter
+                  key: mongodb-uri
+          ports:
+            - name: metrics
+              containerPort: 9216
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: metrics
+            initialDelaySeconds: 15
+            periodSeconds: 20
+---
+# -----------------------------------------------------------------------------
+# BLOCK 3 — Service for mongodb-exporter
+# Named port "metrics" for the ServiceMonitor below.
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb-exporter
+  namespace: default
+  labels:
+    app: mongodb-exporter
+spec:
+  type: ClusterIP
+  selector:
+    app: mongodb-exporter
+  ports:
+    - name: metrics
+      port: 9216
+      targetPort: metrics
+---
+# -----------------------------------------------------------------------------
+# BLOCK 4 — ServiceMonitor: scrape mongodb-exporter
+# Prometheus (serviceMonitorNamespaceSelector: {}) picks this up cluster-wide.
+# -----------------------------------------------------------------------------
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: mongodb-exporter
+  namespace: default
+  labels:
+    app: mongodb-exporter
+spec:
+  selector:
+    matchLabels:
+      app: mongodb-exporter
+  namespaceSelector:
+    matchNames:
+      - default
+  endpoints:
+    - port: metrics
+      interval: 15s
+      path: /metrics
+      scrapeTimeout: 10s

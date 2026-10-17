@@ -9,6 +9,7 @@ Shared Prometheus Operator stack: scrape metrics about **all pods** in the clust
 | [`prometheus.yml`](prometheus.yml) | Prometheus + kube-state-metrics + ServiceMonitors + Ingress + metrics-demo |
 | [`grafana/grafana.yml`](grafana/grafana.yml) | Grafana Deployment + datasource + Ingress |
 | [`grafana/dashboards/`](grafana/dashboards/) | Dashboard JSON — Cluster Pods, Pods by Namespace, Workload Pods |
+| [`mongodb/`](mongodb/) | MongoDB exporter + [Prod Overview dashboard](https://grafana.com/grafana/dashboards/25227-mongodb-prod-overview/) — see [mongodb/README.md](mongodb/README.md) |
 
 ## What this creates
 
@@ -23,6 +24,7 @@ Shared Prometheus Operator stack: scrape metrics about **all pods** in the clust
 | ServiceMonitor | `metrics-demo`       | Scrapes the demo app                                 |
 | Deployment     | `grafana`            | Dashboards over Prometheus                           |
 | Service/Ingress| `grafana`            | UI at `http://grafana.test.local` (admin / admin)    |
+| Deployment     | `mongodb-exporter`   | Optional — MongoDB metrics (`mongodb/`)              |
 
 ## Architecture
 
@@ -79,14 +81,20 @@ From the repo root:
 ```bash
 kubectl apply -f setup/prometheus/prometheus.yml
 
-# Grafana — load JSON from grafana/dashboards/ then deploy
+# Grafana — load JSON from grafana/dashboards/ (+ optional mongodb/) then deploy
 kubectl create configmap grafana-dashboards -n monitoring \
   --from-file=setup/prometheus/grafana/dashboards/ \
+  --from-file=setup/prometheus/mongodb/dashboards/ \
   --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -f setup/prometheus/grafana/grafana.yml
+
+# Optional — MongoDB-specific metrics (needs lab2/lab4 MongoDB first)
+kubectl apply -f setup/prometheus/mongodb/mongodb-exporter.yml
 ```
 
-Add more boards by dropping `*.json` into `grafana/dashboards/`, then re-run the `kubectl create configmap …` command and `kubectl -n monitoring rollout restart deployment/grafana`.
+Add more boards by dropping `*.json` into `grafana/dashboards/` (or `mongodb/dashboards/`), then re-run the `kubectl create configmap …` command and `kubectl -n monitoring rollout restart deployment/grafana`.
+
+MongoDB exporter details: [`mongodb/README.md`](mongodb/README.md).
 
 Check status:
 
@@ -123,6 +131,7 @@ Provisioned dashboards:
 - **Cluster Pods** — overview of `kube_pod_*`
 - **Pods by Namespace — Resources** — filter by namespace/pod; CPU, memory, requests/limits, network, filesystem, restarts
 - **Workload Pods** — pick Deployment / StatefulSet / DaemonSet; lists its pods with CPU/memory/replicas
+- **MongoDB — Prod Overview** — ops, latency, connections, WiredTiger, dbStats (needs `mongodb-exporter`)
 
 Or build panels with the queries below.
 
@@ -150,6 +159,7 @@ Open **Status → Targets** and confirm:
 
 - `serviceMonitor/monitoring/kube-state-metrics` — UP
 - `serviceMonitor/default/metrics-demo` — UP
+- `serviceMonitor/default/mongodb-exporter` — UP (if MongoDB exporter applied)
 - `kubernetes-pods` — UP for `metrics-demo` (annotation scrape)
 - `kubelet-cadvisor` — UP (real CPU / memory / network / FS usage)
 
@@ -170,6 +180,7 @@ The container must serve Prometheus text format on that path/port.
 ## Cleanup
 
 ```bash
+kubectl delete -f setup/prometheus/mongodb/mongodb-exporter.yml --ignore-not-found
 kubectl delete configmap grafana-dashboards -n monitoring --ignore-not-found
 kubectl delete -f setup/prometheus/grafana/grafana.yml
 kubectl delete -f setup/prometheus/prometheus.yml

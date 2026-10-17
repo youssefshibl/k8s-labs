@@ -68,9 +68,15 @@ kubectl apply -f main.yml
 kubectl apply -f ../setup/prometheus/prometheus.yml
 kubectl create configmap grafana-dashboards -n monitoring \
   --from-file=../setup/prometheus/grafana/dashboards/ \
+  --from-file=../setup/prometheus/mongodb/dashboards/ \
   --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -f ../setup/prometheus/grafana/grafana.yml
+
+# 3) MongoDB metrics exporter + Grafana board
+kubectl apply -f ../setup/prometheus/mongodb/mongodb-exporter.yml
 ```
+
+MongoDB exporter details: [`setup/prometheus/mongodb/README.md`](../setup/prometheus/mongodb/README.md).
 
 Check app:
 
@@ -104,6 +110,7 @@ http://grafana.test.local
 ## Cleanup
 
 ```bash
+kubectl delete -f ../setup/prometheus/mongodb/mongodb-exporter.yml --ignore-not-found
 kubectl delete configmap grafana-dashboards -n monitoring --ignore-not-found
 kubectl delete -f ../setup/prometheus/grafana/grafana.yml
 kubectl delete -f ../setup/prometheus/prometheus.yml
