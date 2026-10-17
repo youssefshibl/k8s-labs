@@ -9,6 +9,7 @@ Local Kubernetes labs on kind (`kind-dev`) with MetalLB + nginx Ingress.
 | [lab3](lab3/) | Stateful MongoDB + TLS via cert-manager (`test-web.test.local`) |
 | [lab4](lab4/) | Prometheus + Grafana for Kubernetes (3 pod/workload dashboards) |
 | [lab5](lab5/) | MongoDB & PostgreSQL exporters + Grafana DB dashboards |
+| [lab6](lab6/) | All container logs → Grafana (Loki + Promtail) |
 
 ## Architecture overview
 
@@ -57,6 +58,12 @@ flowchart TB
     L5PG --> Prom
   end
 
+  subgraph lab6 [Lab 6]
+    Loki["Loki + Promtail"]
+    Logs["all container logs"]
+    Logs --> Loki --> Prom
+  end
+
   DNS --> LB --> IC
   IC --> L1Ing
   IC --> L2Ing
@@ -86,8 +93,8 @@ kubectl create configmap grafana-dashboards -n monitoring \
   --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -f lab4/grafana.yml
 
-# lab5 — MongoDB / PostgreSQL exporters + DB dashboards
-# see lab5/README.md
+# lab5 — MongoDB / PostgreSQL exporters + DB dashboards (see lab5/README.md)
+# lab6 — container logs → Grafana via Loki (see lab6/README.md)
 
 # dashboard UI (after Dashboard + local CA are installed)
 kubectl apply -f setup/dashboard/admin-user.yml

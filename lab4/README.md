@@ -2,7 +2,7 @@
 
 Configure **Prometheus Operator**, **Prometheus**, and **Grafana** on your kind cluster to scrape metrics about pods and workloads, with three provisioned dashboards.
 
-Database exporters (MongoDB / PostgreSQL): see **[lab5](../lab5/)**.
+Related labs: **[lab5](../lab5/)** (DB metrics), **[lab6](../lab6/)** (container logs → Grafana).
 
 ## Files
 

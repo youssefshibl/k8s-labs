@@ -13,12 +13,15 @@
 #   kubectl create configmap grafana-dashboards -n monitoring \
 #     --from-file=lab4/dashboards/ \
 #     --dry-run=client -o yaml | kubectl apply -f -
-#   # optional — lab5:
+#   # optional — lab5 / lab6 boards:
 #   kubectl create configmap grafana-dashboards-mongodb -n monitoring \
 #     --from-file=lab5/mongodb/dashboards/ \
 #     --dry-run=client -o yaml | kubectl apply -f -
 #   kubectl create configmap grafana-dashboards-postgresql -n monitoring \
 #     --from-file=lab5/postgresql/dashboards/ \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl create configmap grafana-dashboards-logs -n monitoring \
+#     --from-file=lab6/dashboards/ \
 #     --dry-run=client -o yaml | kubectl apply -f -
 #   kubectl apply -f lab4/grafana.yml
 #
@@ -57,6 +60,15 @@ data:
         url: http://prometheus.monitoring.svc:9090
         isDefault: true
         editable: true
+      # Loki is used by lab6 (container logs). Safe to keep even before lab6 is applied.
+      - name: Loki
+        type: loki
+        uid: loki
+        access: proxy
+        url: http://loki.monitoring.svc:3100
+        editable: true
+        jsonData:
+          maxLines: 1000
 ---
 # -----------------------------------------------------------------------------
 # BLOCK 2 — ConfigMap: dashboard provider
@@ -162,13 +174,15 @@ spec:
             sources:
               - configMap:
                   name: grafana-dashboards
-              # add this back in if you want to use the mongodb and postgresql dashboards
-              # - configMap:
-              #     name: grafana-dashboards-mongodb
-              #     optional: true
-              # - configMap:
-              #     name: grafana-dashboards-postgresql
-              #     optional: true
+              - configMap:
+                  name: grafana-dashboards-mongodb
+                  optional: true
+              - configMap:
+                  name: grafana-dashboards-postgresql
+                  optional: true
+              - configMap:
+                  name: grafana-dashboards-logs
+                  optional: true
         - name: storage
           emptyDir: {}
 ---

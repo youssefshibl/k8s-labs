@@ -1,0 +1,35 @@
+# =============================================================================
+# Lab 6 — Grafana datasources (Prometheus + Loki)
+# =============================================================================
+# Replaces the lab4 grafana-datasources ConfigMap so Explore can query logs.
+# Apply after lab4 Grafana is up, then restart Grafana:
+#   kubectl apply -f lab6/grafana-datasources.yml
+#   kubectl -n monitoring rollout restart deployment/grafana
+# =============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: monitoring
+  labels:
+    app: grafana
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        uid: prometheus
+        access: proxy
+        url: http://prometheus.monitoring.svc:9090
+        isDefault: true
+        editable: true
+      - name: Loki
+        type: loki
+        uid: loki
+        access: proxy
+        url: http://loki.monitoring.svc:3100
+        editable: true
+        jsonData:
+          maxLines: 1000
