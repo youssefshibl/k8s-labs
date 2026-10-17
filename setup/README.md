@@ -1,4 +1,16 @@
-# Labs setup — local CA
+# Labs setup
+
+Shared cluster pieces used by more than one lab.
+
+| Path | Purpose | Used by |
+|------|---------|---------|
+| [`local-ca.yml`](local-ca.yml) | Local CA + `labs-ca-issuer` (cert-manager) | lab3, dashboard |
+| [`prometheus/`](prometheus/) | Prometheus + kube-state-metrics + Ingress | lab4 |
+| [`dashboard/`](dashboard/) | Kubernetes Dashboard Ingress + admin-user | cluster UI |
+
+---
+
+# Local CA
 
 Shared cert-manager CA used by labs that need TLS (e.g. lab3). Apply once per cluster.
 
@@ -102,3 +114,15 @@ kubectl delete -f setup/local-ca.yml
 sudo rm -f /usr/local/share/ca-certificates/k8slabs-ca.crt
 sudo update-ca-certificates
 ```
+
+---
+
+# Prometheus
+
+See [`prometheus/README.md`](prometheus/README.md).
+
+---
+
+# Kubernetes Dashboard
+
+See [`dashboard/README.md`](dashboard/README.md).

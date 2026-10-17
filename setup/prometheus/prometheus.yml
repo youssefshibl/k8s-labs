@@ -1,0 +1,575 @@
+# =============================================================================
+# Lab 4 — Prometheus Operator stack
+# =============================================================================
+# Prerequisites (once per cluster — installs CRDs + operator controller):
+#   kubectl apply --server-side -f \
+#     https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.78.2/bundle.yaml
+#
+# Then apply this file (from repo root):
+#   kubectl apply -f setup/prometheus/prometheus.yml
+#
+# What this file deploys (in order):
+#   1) monitoring Namespace
+#   2) RBAC so Prometheus can discover pods/services cluster-wide
+#   3) Secret with extra scrape jobs (annotation-based pod discovery)
+#   4) Prometheus CR (operator creates the StatefulSet / pods)
+#   5) Service + Ingress for the Prometheus UI
+#   6) kube-state-metrics (metrics ABOUT every pod in the cluster)
+#   7) ServiceMonitor so Prometheus scrapes kube-state-metrics
+#   8) metrics-demo app + ServiceMonitor (proves scraping works)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# BLOCK 1 — Namespace
+# Isolates monitoring components from the lab apps (mongodb / test-web).
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    app.kubernetes.io/part-of: lab4-prometheus
+---
+# -----------------------------------------------------------------------------
+# BLOCK 2 — ServiceAccount for Prometheus
+# Pods created by the Prometheus CR will run as this identity.
+# ClusterRoleBinding (block 4) attaches permissions to this account.
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: monitoring
+  labels:
+    app: prometheus
+---
+# -----------------------------------------------------------------------------
+# BLOCK 3 — ClusterRole for Prometheus
+# Permissions Prometheus needs to discover scrape targets via the API:
+#   - list/watch pods, services, endpoints, nodes → kubernetes service discovery
+#   - get nodes/metrics → kubelet / cAdvisor style endpoints (if used later)
+#   - get /metrics non-resource URL → scrape some cluster components
+# Cluster-scoped (not Role) because targets live in many namespaces.
+# -----------------------------------------------------------------------------
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus
+  labels:
+    app: prometheus
+rules:
+  # Core API objects used for service / pod discovery
+  - apiGroups: [""]
+    resources:
+      - nodes
+      - nodes/metrics
+      - services
+      - endpoints
+      - pods
+    verbs: ["get", "list", "watch"]
+  # ConfigMaps (some scrape configs / TLS material patterns use them)
+  - apiGroups: [""]
+    resources:
+      - configmaps
+    verbs: ["get"]
+  # Discover Ingress backends if needed
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - ingresses
+    verbs: ["get", "list", "watch"]
+  # Allow HTTP GET on the cluster /metrics path
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
+---
+# -----------------------------------------------------------------------------
+# BLOCK 4 — ClusterRoleBinding for Prometheus
+# Links ClusterRole "prometheus" → ServiceAccount monitoring/prometheus.
+# Without this, Prometheus pods cannot list pods/services and SD fails.
+# -----------------------------------------------------------------------------
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus
+  labels:
+    app: prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: monitoring
+---
+# -----------------------------------------------------------------------------
+# BLOCK 5 — Secret: additional scrape configs (annotation-based pod SD)
+# Prometheus Operator mounts this Secret into the Prometheus pod and merges
+# the YAML under prometheus-additional.yaml into prometheus.yml.
+#
+# Job "kubernetes-pods":
+#   - Discovers EVERY pod in the cluster (role: pod)
+#   - KEEP only pods with annotation prometheus.io/scrape=true
+#   - Optionally rewrite path/port from annotations
+#   - Copy useful labels (pod name, namespace, pod labels) onto the time series
+#
+# This is how you scrape apps that do NOT have a ServiceMonitor yet.
+# Example: metrics-demo (block 13) sets those annotations.
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Secret
+metadata:
+  name: additional-scrape-configs
+  namespace: monitoring
+  labels:
+    app: prometheus
+type: Opaque
+stringData:
+  # Key name must match Prometheus.spec.additionalScrapeConfigs.key below
+  prometheus-additional.yaml: |
+    - job_name: kubernetes-pods
+      kubernetes_sd_configs:
+        # Ask the API for all Pods; Prometheus turns each into a potential target
+        - role: pod
+      relabel_configs:
+        # Drop pods unless they opt in with prometheus.io/scrape: "true"
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+          action: keep
+          regex: "true"
+        # If prometheus.io/path is set, use it instead of default /metrics
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+          action: replace
+          target_label: __metrics_path__
+          regex: (.+)
+        # If prometheus.io/port is set, scrape host:thatPort instead of the
+        # default container port from __address__
+        - source_labels:
+            - __address__
+            - __meta_kubernetes_pod_annotation_prometheus_io_port
+          action: replace
+          regex: ([^:]+)(?::\d+)?;(\d+)
+          replacement: $1:$2
+          target_label: __address__
+        # Promote pod labels (app=..., etc.) to metric labels
+        - action: labelmap
+          regex: __meta_kubernetes_pod_label_(.+)
+        # Stable labels for queries: namespace="...", pod="..."
+        - source_labels: [__meta_kubernetes_namespace]
+          action: replace
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          action: replace
+          target_label: pod
+---
+# -----------------------------------------------------------------------------
+# BLOCK 6 — Prometheus custom resource (CR)
+# This is NOT a Deployment you manage by hand. The Prometheus Operator watches
+# this CR and creates/updates a StatefulSet, ConfigMap, and related objects.
+#
+# Empty selectors {} mean: load ServiceMonitors / PodMonitors from ALL
+# namespaces (not only monitoring). That is how kube-state-metrics and
+# metrics-demo get scraped after you apply their ServiceMonitors.
+#
+# additionalScrapeConfigs points at the Secret from block 5.
+# -----------------------------------------------------------------------------
+apiVersion: monitoring.coreos.com/v1
+kind: Prometheus
+metadata:
+  name: prometheus
+  namespace: monitoring
+  labels:
+    app: prometheus
+spec:
+  replicas: 1
+  # Must match the ServiceAccount from block 2
+  serviceAccountName: prometheus
+  # Match ALL ServiceMonitors (label selector empty = everything)
+  serviceMonitorSelector: {}
+  # Look for those ServiceMonitors in ALL namespaces
+  serviceMonitorNamespaceSelector: {}
+  # Same idea for PodMonitor CRs (none in this lab, but ready if you add some)
+  podMonitorSelector: {}
+  podMonitorNamespaceSelector: {}
+  # Merge annotation-based job from block 5
+  additionalScrapeConfigs:
+    name: additional-scrape-configs
+    key: prometheus-additional.yaml
+  # Admin API can delete series / snapshot; keep off for a simple lab
+  enableAdminAPI: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+---
+# -----------------------------------------------------------------------------
+# BLOCK 7 — Service for Prometheus UI / API
+# ClusterIP front-door on port 9090. Selector matches labels the operator puts
+# on Prometheus pods (app.kubernetes.io/name=prometheus, prometheus=<CR name>).
+# Ingress (block 8) points at this Service.
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: monitoring
+  labels:
+    app: prometheus
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: prometheus
+    prometheus: prometheus
+  ports:
+    - name: web
+      port: 9090
+      targetPort: 9090
+---
+# -----------------------------------------------------------------------------
+# BLOCK 8 — Ingress for Prometheus UI
+# Exposes http://prometheus.test.local via the shared nginx Ingress controller
+# (same pattern as lab1/lab2 hosts under *.test.local).
+# -----------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: prometheus
+  namespace: monitoring
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: prometheus.test.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: prometheus
+                port:
+                  number: 9090
+---
+# -----------------------------------------------------------------------------
+# BLOCK 9 — ServiceAccount for kube-state-metrics
+# kube-state-metrics is a separate process from Prometheus. It talks to the
+# Kubernetes API and translates object state into Prometheus metrics
+# (e.g. kube_pod_info, kube_pod_status_phase for EVERY pod).
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kube-state-metrics
+  namespace: monitoring
+  labels:
+    app: kube-state-metrics
+---
+# -----------------------------------------------------------------------------
+# BLOCK 10 — ClusterRole for kube-state-metrics
+# Read-only list/watch on cluster objects so it can emit metrics about them.
+# No create/update/delete — it only observes.
+# This is the main way this lab "gets data from all pods".
+# -----------------------------------------------------------------------------
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kube-state-metrics
+  labels:
+    app: kube-state-metrics
+rules:
+  # Core resources (pods, nodes, PVCs, …)
+  - apiGroups: [""]
+    resources:
+      - configmaps
+      - secrets
+      - nodes
+      - pods
+      - services
+      - serviceaccounts
+      - resourcequotas
+      - replicationcontrollers
+      - limitranges
+      - persistentvolumeclaims
+      - persistentvolumes
+      - namespaces
+      - endpoints
+      - events
+    verbs: ["list", "watch"]
+  # Workloads
+  - apiGroups: ["apps"]
+    resources:
+      - statefulsets
+      - daemonsets
+      - deployments
+      - replicasets
+    verbs: ["list", "watch"]
+  # Jobs / CronJobs
+  - apiGroups: ["batch"]
+    resources:
+      - cronjobs
+      - jobs
+    verbs: ["list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources:
+      - horizontalpodautoscalers
+    verbs: ["list", "watch"]
+  - apiGroups: ["policy"]
+    resources:
+      - poddisruptionbudgets
+    verbs: ["list", "watch"]
+  - apiGroups: ["certificates.k8s.io"]
+    resources:
+      - certificatesigningrequests
+    verbs: ["list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources:
+      - endpointslices
+    verbs: ["list", "watch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources:
+      - storageclasses
+      - volumeattachments
+    verbs: ["list", "watch"]
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources:
+      - mutatingwebhookconfigurations
+      - validatingwebhookconfigurations
+    verbs: ["list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - networkpolicies
+      - ingresses
+    verbs: ["list", "watch"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources:
+      - leases
+    verbs: ["list", "watch"]
+---
+# -----------------------------------------------------------------------------
+# BLOCK 11 — ClusterRoleBinding for kube-state-metrics
+# Attaches the read-only ClusterRole to the kube-state-metrics ServiceAccount.
+# -----------------------------------------------------------------------------
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kube-state-metrics
+  labels:
+    app: kube-state-metrics
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kube-state-metrics
+subjects:
+  - kind: ServiceAccount
+    name: kube-state-metrics
+    namespace: monitoring
+---
+# -----------------------------------------------------------------------------
+# BLOCK 12 — Deployment: kube-state-metrics
+# Runs one replica that serves:
+#   - :8080 /metrics  → cluster object metrics (what Prometheus scrapes)
+#   - :8081           → kube-state-metrics own telemetry
+# After scrape is wired (block 14), query e.g. kube_pod_info in the UI.
+# -----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kube-state-metrics
+  namespace: monitoring
+  labels:
+    app: kube-state-metrics
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kube-state-metrics
+  template:
+    metadata:
+      labels:
+        app: kube-state-metrics
+    spec:
+      serviceAccountName: kube-state-metrics
+      containers:
+        - name: kube-state-metrics
+          image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.14.0
+          ports:
+            # Main metrics endpoint scraped by Prometheus
+            - name: http-metrics
+              containerPort: 8080
+            # Self-metrics of the exporter process
+            - name: telemetry
+              containerPort: 8081
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http-metrics
+            initialDelaySeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http-metrics
+            initialDelaySeconds: 5
+          # Hardened defaults for a read-only exporter
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+---
+# -----------------------------------------------------------------------------
+# BLOCK 13 — Service for kube-state-metrics
+# Headless (clusterIP: None) is the usual pattern so Prometheus scrapes the
+# pod IP directly via Endpoints. Port names MUST match the ServiceMonitor
+# endpoints.port field in block 14 (http-metrics).
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: kube-state-metrics
+  namespace: monitoring
+  labels:
+    app: kube-state-metrics
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app: kube-state-metrics
+  ports:
+    - name: http-metrics
+      port: 8080
+      targetPort: http-metrics
+    - name: telemetry
+      port: 8081
+      targetPort: telemetry
+---
+# -----------------------------------------------------------------------------
+# BLOCK 14 — ServiceMonitor: scrape kube-state-metrics
+# A ServiceMonitor is a Prometheus Operator CR. The operator turns it into a
+# scrape job inside Prometheus config.
+#
+# selector          → which Service(s) to scrape (labels app=kube-state-metrics)
+# namespaceSelector → which namespaces to search for those Services
+# endpoints.port    → must match a named port on that Service
+# interval          → scrape every 30s
+# honorLabels       → keep labels that kube-state-metrics already sets
+# -----------------------------------------------------------------------------
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kube-state-metrics
+  namespace: monitoring
+  labels:
+    app: kube-state-metrics
+spec:
+  selector:
+    matchLabels:
+      app: kube-state-metrics
+  namespaceSelector:
+    matchNames:
+      - monitoring
+  endpoints:
+    - port: http-metrics
+      interval: 30s
+      honorLabels: true
+---
+# -----------------------------------------------------------------------------
+# BLOCK 15 — Deployment: metrics-demo
+# Tiny sample app that serves real Prometheus metrics on /metrics.
+# Lives in default (alongside lab2 apps) to show cross-namespace scraping.
+#
+# Pod annotations drive the kubernetes-pods job from block 5:
+#   prometheus.io/scrape: "true"  → include this pod
+#   prometheus.io/port: "8080"    → scrape this port
+#   prometheus.io/path: "/metrics"
+# -----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metrics-demo
+  namespace: default
+  labels:
+    app: metrics-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: metrics-demo
+  template:
+    metadata:
+      labels:
+        app: metrics-demo
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: example
+          image: quay.io/brancz/prometheus-example-app:v0.5.0
+          ports:
+            - name: metrics
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 50m
+              memory: 64Mi
+---
+# -----------------------------------------------------------------------------
+# BLOCK 16 — Service for metrics-demo
+# Stable ClusterIP + named port "metrics" for the ServiceMonitor in block 17.
+# The annotation job (block 5) scrapes the pod directly; this Service is for
+# the ServiceMonitor path (operator-native discovery).
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: metrics-demo
+  namespace: default
+  labels:
+    app: metrics-demo
+spec:
+  type: ClusterIP
+  selector:
+    app: metrics-demo
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: metrics
+---
+# -----------------------------------------------------------------------------
+# BLOCK 17 — ServiceMonitor: scrape metrics-demo
+# Second scrape path for the demo app (in addition to pod annotations).
+# In Prometheus UI → Status → Targets you should see BOTH:
+#   - serviceMonitor/default/metrics-demo
+#   - kubernetes-pods (annotation job) for the same pod
+# -----------------------------------------------------------------------------
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: metrics-demo
+  namespace: default
+  labels:
+    app: metrics-demo
+spec:
+  selector:
+    matchLabels:
+      app: metrics-demo
+  namespaceSelector:
+    matchNames:
+      - default
+  endpoints:
+    - port: metrics
+      interval: 15s
+      path: /metrics

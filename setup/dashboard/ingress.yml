@@ -1,0 +1,38 @@
+# Kubernetes Dashboard Ingress
+# Prerequisites: Dashboard installed + cert-manager + setup/local-ca.yml
+#   kubectl apply -f setup/dashboard/ingress.yml
+#
+# UI: https://dashboard.test.local
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kubernetes-dashboard
+  namespace: kubernetes-dashboard
+  labels:
+    k8s-app: kubernetes-dashboard
+  annotations:
+    # Dashboard Service speaks HTTPS on :443 → pod :8443
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    # Dashboard pod uses an auto-generated self-signed cert
+    nginx.ingress.kubernetes.io/proxy-ssl-verify: "off"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: labs-ca-issuer
+    cert-manager.io/common-name: dashboard.test.local
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - dashboard.test.local
+      secretName: kubernetes-dashboard-tls
+  rules:
+    - host: dashboard.test.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kubernetes-dashboard
+                port:
+                  number: 443

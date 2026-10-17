@@ -7,6 +7,7 @@ Local Kubernetes labs on kind (`kind-dev`) with MetalLB + nginx Ingress.
 | [lab1](lab1/) | Test nginx Deployment, Service & Ingress |
 | [lab2](lab2/) | Web app (mongo-express) connected to MongoDB |
 | [lab3](lab3/) | Stateful MongoDB + TLS via cert-manager (`test-web.test.local`) |
+| [lab4](lab4/) | Lab2 stack + Prometheus Operator (metrics for all pods) |
 
 ## Architecture overview
 
@@ -17,6 +18,7 @@ flowchart TB
     LB["MetalLB"]
     IC["ingress-nginx"]
     CM["cert-manager + setup/ local CA"]
+    Prom["setup/prometheus/"]
   end
 
   subgraph lab1 [Lab 1]
@@ -42,109 +44,49 @@ flowchart TB
     L3Cron --> L3Db
   end
 
+  subgraph lab4 [Lab 4]
+    L4Ing["Ingress test-web"]
+    L4Web["mongo-express + mongodb<br/>same as lab2"]
+    L4Ing --> L4Web
+  end
+
   DNS --> LB --> IC
   IC --> L1Ing
   IC --> L2Ing
   IC --> L3Ing
+  IC --> L4Ing
   CM -.-> L3Ing
+  Prom -.->|metrics about| L4Web
 ```
 
 ## Setup (shared)
 
-One-time cluster setup used by labs that need TLS:
+One-time / shared cluster pieces used by labs:
 
 | Path | Purpose |
 |------|---------|
-| [setup/](setup/) | Local CA + `labs-ca-issuer` (cert-manager) |
+| [setup/local-ca.yml](setup/local-ca.yml) | Local CA + `labs-ca-issuer` (cert-manager) — lab3, dashboard |
+| [setup/prometheus/](setup/prometheus/) | Prometheus Operator stack — [README](setup/prometheus/README.md) (lab4) |
+| [setup/dashboard/](setup/dashboard/) | Kubernetes Dashboard Ingress — [README](setup/dashboard/README.md) |
 
 ```bash
-# after cert-manager is installed
+# after cert-manager is installed (lab3 TLS / dashboard TLS)
 kubectl apply -f setup/local-ca.yml
+
+# after prometheus-operator bundle is installed (lab4)
+kubectl apply -f setup/prometheus/prometheus.yml
+
+# dashboard UI (after Dashboard + local CA are installed)
+kubectl apply -f setup/dashboard/admin-user.yml
+kubectl apply -f setup/dashboard/ingress.yml
 ```
 
-See [setup/README.md](setup/README.md) to trust the CA on the host.
+See [setup/README.md](setup/README.md) for CA trust, Prometheus, and Dashboard details.
 
 ---
 
 ## Kubernetes Dashboard
 
-Web UI to browse cluster resources (pods, deployments, services, logs, etc.).
+Web UI at `https://dashboard.test.local` — full install and Ingress steps:
 
-### Install
-
-Apply the recommended manifests (Dashboard + metrics scraper):
-
-```bash
-kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
-```
-
-Create an admin ServiceAccount and bind it to `cluster-admin` (lab / local use only):
-
-```bash
-kubectl apply -f - <<'EOF'
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: admin-user
-  namespace: kubernetes-dashboard
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: admin-user
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: cluster-admin
-subjects:
-  - kind: ServiceAccount
-    name: admin-user
-    namespace: kubernetes-dashboard
-EOF
-```
-
-Check it is running:
-
-```bash
-kubectl get pods -n kubernetes-dashboard
-```
-
-### Access
-
-The Dashboard Service is ClusterIP-only, so use port-forward:
-
-```bash
-kubectl -n kubernetes-dashboard port-forward svc/kubernetes-dashboard 8443:443
-```
-
-Open in a browser:
-
-```
-https://localhost:8443
-```
-
-Accept the self-signed certificate warning.
-
-### Login token
-
-Create a bearer token for `admin-user`:
-
-```bash
-kubectl -n kubernetes-dashboard create token admin-user
-```
-
-On the login page choose **Token**, paste the output, and sign in.
-
-Optional — token valid for 24 hours:
-
-```bash
-kubectl -n kubernetes-dashboard create token admin-user --duration=24h
-```
-
-### Cleanup
-
-```bash
-kubectl delete -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
-kubectl delete clusterrolebinding admin-user
-kubectl delete sa admin-user -n kubernetes-dashboard
-```
+→ **[setup/dashboard/README.md](setup/dashboard/README.md)**
