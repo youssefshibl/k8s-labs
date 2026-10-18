@@ -1,0 +1,520 @@
+# =============================================================================
+# Lab 7 — Auto-instrumented demo apps (Python + Node.js) + PostgreSQL
+# =============================================================================
+# Annotations opt each Deployment into OpenTelemetry Operator injection.
+# Instrumentation CR lives in monitoring (see instrumentation.yml).
+#
+# Flow for distributed traces (HTTP + DB spans):
+#   Browser → hello-nodejs (pg) → hello-python (psycopg2) → postgres
+#          → OTLP collector → Jaeger
+# =============================================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: otel-demo
+---
+# -----------------------------------------------------------------------------
+# PostgreSQL (demo database)
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres
+  namespace: otel-demo
+  labels:
+    app: postgres
+type: Opaque
+stringData:
+  POSTGRES_USER: app
+  POSTGRES_PASSWORD: changeme
+  POSTGRES_DB: appdb
+  DATABASE_URL: postgresql://app:changeme@postgres.otel-demo.svc:5432/appdb
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: otel-demo
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: postgres
+                  key: POSTGRES_DB
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "app", "-d", "appdb"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: otel-demo
+  labels:
+    app: postgres
+spec:
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+# -----------------------------------------------------------------------------
+# Python (Flask) — DB ops via psycopg2 (auto-instrumented)
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hello-python
+  namespace: otel-demo
+data:
+  app.py: |
+    import os
+    import time
+
+    import psycopg2
+    from flask import Flask, jsonify
+
+    app = Flask(__name__)
+    DATABASE_URL = os.environ["DATABASE_URL"]
+
+
+    def connect():
+        return psycopg2.connect(DATABASE_URL)
+
+
+    def init_db():
+        for attempt in range(30):
+            try:
+                with connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            CREATE TABLE IF NOT EXISTS notes (
+                                id SERIAL PRIMARY KEY,
+                                service TEXT NOT NULL,
+                                message TEXT NOT NULL,
+                                created_at TIMESTAMPTZ DEFAULT NOW()
+                            )
+                            """
+                        )
+                    conn.commit()
+                return
+            except Exception as exc:
+                print(f"waiting for postgres: {exc}")
+                time.sleep(2)
+        raise RuntimeError("postgres not ready")
+
+
+    @app.get("/")
+    def root():
+        return jsonify(service="hello-python", message="hello from python")
+
+
+    @app.get("/api/hello")
+    def hello():
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO notes (service, message) VALUES (%s, %s) RETURNING id",
+                    ("hello-python", "hello"),
+                )
+                note_id = cur.fetchone()[0]
+                cur.execute("SELECT count(*) FROM notes")
+                count = cur.fetchone()[0]
+            conn.commit()
+        return jsonify(
+            service="hello-python",
+            path="/api/hello",
+            note_id=note_id,
+            notes_count=count,
+        )
+
+
+    @app.get("/api/notes")
+    def list_notes():
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, service, message, created_at::text "
+                    "FROM notes ORDER BY id DESC LIMIT 20"
+                )
+                rows = [
+                    {
+                        "id": r[0],
+                        "service": r[1],
+                        "message": r[2],
+                        "created_at": r[3],
+                    }
+                    for r in cur.fetchall()
+                ]
+        return jsonify(service="hello-python", notes=rows)
+
+
+    @app.get("/api/slow")
+    def slow():
+        time.sleep(0.3)
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT pg_sleep(0.2)")
+                cur.execute(
+                    "INSERT INTO notes (service, message) VALUES (%s, %s) RETURNING id",
+                    ("hello-python", "slow"),
+                )
+                note_id = cur.fetchone()[0]
+            conn.commit()
+        return jsonify(service="hello-python", message="slow ok", note_id=note_id)
+
+
+    if __name__ == "__main__":
+        init_db()
+        app.run(host="0.0.0.0", port=8080)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-python
+  namespace: otel-demo
+  labels:
+    app: hello-python
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hello-python
+  template:
+    metadata:
+      labels:
+        app: hello-python
+      annotations:
+        instrumentation.opentelemetry.io/inject-python: "monitoring/demo"
+    spec:
+      containers:
+        - name: app
+          image: python:3.12-slim
+          workingDir: /app
+          command:
+            - sh
+            - -c
+            - |
+              pip install --no-cache-dir flask==3.0.3 psycopg2-binary==2.9.9 >/tmp/pip.log 2>&1
+              exec python /app/app.py
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: hello-python
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: postgres
+                  key: DATABASE_URL
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 25
+            periodSeconds: 5
+          volumeMounts:
+            - name: app
+              mountPath: /app
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
+      volumes:
+        - name: app
+          configMap:
+            name: hello-python
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-python
+  namespace: otel-demo
+  labels:
+    app: hello-python
+spec:
+  selector:
+    app: hello-python
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+# -----------------------------------------------------------------------------
+# Node.js (Express) — pg DB ops + call Python (distributed trace)
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hello-nodejs
+  namespace: otel-demo
+data:
+  package.json: |
+    {
+      "name": "hello-nodejs",
+      "version": "1.0.0",
+      "main": "server.js",
+      "dependencies": {
+        "express": "4.21.0",
+        "pg": "8.13.0"
+      }
+    }
+  server.js: |
+    const express = require("express");
+    const http = require("http");
+    const { Pool } = require("pg");
+
+    const app = express();
+    const port = 8080;
+    const pythonHost = process.env.PYTHON_HOST || "hello-python.otel-demo.svc";
+    const pythonPort = process.env.PYTHON_PORT || "8080";
+    const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+
+    async function initDb() {
+      for (let i = 0; i < 30; i++) {
+        try {
+          await pool.query(`
+            CREATE TABLE IF NOT EXISTS notes (
+              id SERIAL PRIMARY KEY,
+              service TEXT NOT NULL,
+              message TEXT NOT NULL,
+              created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+          `);
+          return;
+        } catch (err) {
+          console.log("waiting for postgres:", err.message);
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+      }
+      throw new Error("postgres not ready");
+    }
+
+    function callPython(path) {
+      return new Promise((resolve, reject) => {
+        const req = http.request(
+          { hostname: pythonHost, port: pythonPort, path, method: "GET", timeout: 8000 },
+          (res) => {
+            let body = "";
+            res.on("data", (c) => (body += c));
+            res.on("end", () => resolve({ status: res.statusCode, body }));
+          }
+        );
+        req.on("error", reject);
+        req.end();
+      });
+    }
+
+    app.get("/", async (_req, res) => {
+      try {
+        const insert = await pool.query(
+          "INSERT INTO notes (service, message) VALUES ($1, $2) RETURNING id",
+          ["hello-nodejs", "visit"]
+        );
+        const upstream = await callPython("/api/hello");
+        const count = await pool.query("SELECT count(*)::int AS n FROM notes");
+        res.json({
+          service: "hello-nodejs",
+          message: "hello from node — db + called python",
+          note_id: insert.rows[0].id,
+          notes_count: count.rows[0].n,
+          upstream,
+        });
+      } catch (err) {
+        res.status(502).json({ service: "hello-nodejs", error: String(err) });
+      }
+    });
+
+    app.get("/api/notes", async (_req, res) => {
+      try {
+        const result = await pool.query(
+          "SELECT id, service, message, created_at::text AS created_at FROM notes ORDER BY id DESC LIMIT 20"
+        );
+        res.json({ service: "hello-nodejs", notes: result.rows });
+      } catch (err) {
+        res.status(500).json({ service: "hello-nodejs", error: String(err) });
+      }
+    });
+
+    app.get("/healthz", (_req, res) => res.send("ok"));
+
+    initDb()
+      .then(() => {
+        app.listen(port, "0.0.0.0", () => {
+          console.log(`hello-nodejs listening on ${port}`);
+        });
+      })
+      .catch((err) => {
+        console.error(err);
+        process.exit(1);
+      });
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-nodejs
+  namespace: otel-demo
+  labels:
+    app: hello-nodejs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hello-nodejs
+  template:
+    metadata:
+      labels:
+        app: hello-nodejs
+      annotations:
+        instrumentation.opentelemetry.io/inject-nodejs: "monitoring/demo"
+    spec:
+      containers:
+        - name: app
+          image: node:20-alpine
+          workingDir: /app
+          command:
+            - sh
+            - -c
+            - |
+              cp /config/package.json /config/server.js /app/
+              npm install --omit=dev >/tmp/npm.log 2>&1
+              exec node server.js
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: hello-nodejs
+            - name: PYTHON_HOST
+              value: hello-python.otel-demo.svc
+            - name: PYTHON_PORT
+              value: "8080"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: postgres
+                  key: DATABASE_URL
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 35
+            periodSeconds: 5
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: work
+              mountPath: /app
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
+      volumes:
+        - name: config
+          configMap:
+            name: hello-nodejs
+        - name: work
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-nodejs
+  namespace: otel-demo
+  labels:
+    app: hello-nodejs
+spec:
+  selector:
+    app: hello-nodejs
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+# -----------------------------------------------------------------------------
+# Ingress — hit apps via *.test.local
+# -----------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: otel-demo
+  namespace: otel-demo
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: otel-node.test.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hello-nodejs
+                port:
+                  number: 8080
+    - host: otel-python.test.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hello-python
+                port:
+                  number: 8080

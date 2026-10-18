@@ -10,6 +10,7 @@ Local Kubernetes labs on kind (`kind-dev`) with MetalLB + nginx Ingress.
 | [lab4](lab4/) | Prometheus + Grafana for Kubernetes (3 pod/workload dashboards) |
 | [lab5](lab5/) | MongoDB & PostgreSQL exporters + Grafana DB dashboards |
 | [lab6](lab6/) | All container logs → Grafana (Loki + Promtail) |
+| [lab7](lab7/) | OpenTelemetry Operator + Jaeger traces (auto-instrumentation demos) |
 
 ## Architecture overview
 
@@ -64,6 +65,13 @@ flowchart TB
     Logs --> Loki --> Prom
   end
 
+  subgraph lab7 [Lab 7]
+    Apps["Python + Node demos<br/>auto-instrumented"]
+    OTel["OTel Operator + Collector"]
+    Jaeger["Jaeger UI"]
+    Apps --> OTel --> Jaeger
+  end
+
   DNS --> LB --> IC
   IC --> L1Ing
   IC --> L2Ing
@@ -95,6 +103,7 @@ kubectl apply -f lab4/grafana.yml
 
 # lab5 — MongoDB / PostgreSQL exporters + DB dashboards (see lab5/README.md)
 # lab6 — container logs → Grafana via Loki (see lab6/README.md)
+# lab7 — OTel Operator + Jaeger traces (see lab7/README.md)
 
 # dashboard UI (after Dashboard + local CA are installed)
 kubectl apply -f setup/dashboard/admin-user.yml

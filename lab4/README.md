@@ -2,7 +2,7 @@
 
 Configure **Prometheus Operator**, **Prometheus**, and **Grafana** on your kind cluster to scrape metrics about pods and workloads, with three provisioned dashboards.
 
-Related labs: **[lab5](../lab5/)** (DB metrics), **[lab6](../lab6/)** (container logs → Grafana).
+Related labs: **[lab5](../lab5/)** (DB metrics), **[lab6](../lab6/)** (container logs → Grafana), **[lab7](../lab7/)** (traces via OpenTelemetry + Jaeger).
 
 ## Files
 

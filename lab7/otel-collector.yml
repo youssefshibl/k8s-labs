@@ -1,0 +1,43 @@
+# =============================================================================
+# Lab 7 — OpenTelemetry Collector (receives OTLP → exports to Jaeger)
+# =============================================================================
+# Requires OpenTelemetry Operator CRDs (see lab7/README.md).
+# Apply (from repo root):
+#   kubectl apply -f lab7/otel-collector.yml
+# =============================================================================
+
+apiVersion: opentelemetry.io/v1beta1
+kind: OpenTelemetryCollector
+metadata:
+  name: otel
+  namespace: monitoring
+spec:
+  mode: deployment
+  replicas: 1
+  config:
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      batch: {}
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 75
+        spike_limit_percentage: 15
+    exporters:
+      otlp/jaeger:
+        endpoint: jaeger.monitoring.svc:4317
+        tls:
+          insecure: true
+      debug:
+        verbosity: basic
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [otlp/jaeger, debug]

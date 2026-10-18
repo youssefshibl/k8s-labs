@@ -1,0 +1,39 @@
+# =============================================================================
+# Lab 7 — Instrumentation CR (auto-instrumentation config)
+# =============================================================================
+# Tells the OpenTelemetry Operator how to inject language agents and where
+# to send OTLP. Workloads opt in with annotations (see test-services.yml).
+#
+# Reference from another namespace:
+#   instrumentation.opentelemetry.io/inject-python: "monitoring/demo"
+# =============================================================================
+
+apiVersion: opentelemetry.io/v1alpha1
+kind: Instrumentation
+metadata:
+  name: demo
+  namespace: monitoring
+spec:
+  exporter:
+    # Operator-managed collector Service (OpenTelemetryCollector name: otel)
+    endpoint: http://otel-collector.monitoring.svc:4318
+  propagators:
+    - tracecontext
+    - baggage
+  sampler:
+    type: parentbased_traceidratio
+    argument: "1"
+  # Python auto-instrumentation prefers OTLP/HTTP
+  python:
+    env:
+      - name: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: http://otel-collector.monitoring.svc:4318
+      - name: OTEL_EXPORTER_OTLP_PROTOCOL
+        value: http/protobuf
+  # Node.js auto-instrumentation
+  nodejs:
+    env:
+      - name: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: http://otel-collector.monitoring.svc:4318
+      - name: OTEL_EXPORTER_OTLP_PROTOCOL
+        value: http/protobuf
