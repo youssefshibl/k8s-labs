@@ -11,6 +11,7 @@ Local Kubernetes labs on kind (`kind-dev`) with MetalLB + nginx Ingress.
 | [lab5](lab5/) | MongoDB & PostgreSQL exporters + Grafana DB dashboards |
 | [lab6](lab6/) | All container logs → Grafana (Loki + Promtail) |
 | [lab7](lab7/) | OpenTelemetry Operator + Jaeger traces (auto-instrumentation demos) |
+| [lab8](lab8/) | Horizontal Pod Autoscaler — CPU web app + stress Job |
 
 ## Architecture overview
 
@@ -72,6 +73,14 @@ flowchart TB
     Apps --> OTel --> Jaeger
   end
 
+  subgraph lab8 [Lab 8]
+    HpaWeb["Deployment hpa-web<br/>CPU burn /stress"]
+    HPA["HPA CPU 50%"]
+    Stress["Job stress"]
+    Stress --> HpaWeb
+    HPA --> HpaWeb
+  end
+
   DNS --> LB --> IC
   IC --> L1Ing
   IC --> L2Ing
@@ -104,6 +113,7 @@ kubectl apply -f lab4/grafana.yml
 # lab5 — MongoDB / PostgreSQL exporters + DB dashboards (see lab5/README.md)
 # lab6 — container logs → Grafana via Loki (see lab6/README.md)
 # lab7 — OTel Operator + Jaeger traces (see lab7/README.md)
+# lab8 — HPA + stress Job (see lab8/README.md; needs metrics-server)
 
 # dashboard UI (after Dashboard + local CA are installed)
 kubectl apply -f setup/dashboard/admin-user.yml

@@ -1,0 +1,66 @@
+# =============================================================================
+# Lab 8 — Stress Job (drives CPU load against hpa-web)
+# =============================================================================
+# Parallel workers hit GET /stress on the in-cluster Service until HPA scales up.
+# Re-run: kubectl delete -f lab8/stress-job.yml && kubectl apply -f lab8/stress-job.yml
+# =============================================================================
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hpa-web-stress
+  labels:
+    app: hpa-web
+    role: stress
+spec:
+  # several parallel pods = sustained CPU on the Deployment
+  parallelism: 4
+  completions: 4
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app: hpa-web
+        role: stress
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: stress
+          image: curlimages/curl:8.11.1
+          env:
+            - name: TARGET
+              value: http://hpa-web.default.svc.cluster.local/stress
+            - name: DURATION_SEC
+              value: "180"
+            - name: CONCURRENCY
+              value: "8"
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              echo "Stressing ${TARGET} for ${DURATION_SEC}s (concurrency=${CONCURRENCY})"
+              END=$(( $(date +%s) + DURATION_SEC ))
+              ok=0
+              fail=0
+              while [ "$(date +%s)" -lt "$END" ]; do
+                i=0
+                while [ "$i" -lt "$CONCURRENCY" ]; do
+                  if curl -sf --max-time 30 "$TARGET" >/dev/null; then
+                    ok=$((ok + 1))
+                  else
+                    fail=$((fail + 1))
+                  fi &
+                  i=$((i + 1))
+                done
+                wait
+              done
+              echo "done ok=${ok} fail=${fail}"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi

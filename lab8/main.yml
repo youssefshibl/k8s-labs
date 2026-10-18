@@ -1,0 +1,199 @@
+# =============================================================================
+# Lab 8 — Horizontal Pod Autoscaler (HPA)
+# =============================================================================
+# CPU-burning Python web app + Service + Ingress + HPA (CPU target 50%).
+# Generate load with stress-job.yml after metrics-server is installed.
+# =============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hpa-web
+  labels:
+    app: hpa-web
+data:
+  server.py: |
+    #!/usr/bin/env python3
+    """Tiny HTTP app: GET / (info) and GET /stress (CPU burn)."""
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import hashlib
+    import os
+    import time
+
+    HOSTNAME = os.environ.get("HOSTNAME", "unknown")
+    # ~0.2–0.5s CPU on a single request (enough to drive HPA with parallel clients)
+    STRESS_ITERS = int(os.environ.get("STRESS_ITERS", "400000"))
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, fmt, *args):
+            # quieter access log
+            print(f"{self.address_string()} {fmt % args}")
+
+        def _reply(self, code, body, content_type="text/plain; charset=utf-8"):
+            data = body.encode("utf-8") if isinstance(body, str) else body
+            self.send_response(code)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("X-Pod", HOSTNAME)
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):
+            path = self.path.split("?", 1)[0]
+            if path in ("/", "/healthz"):
+                self._reply(
+                    200,
+                    f"hpa-web ok\npod={HOSTNAME}\ntry GET /stress to burn CPU\n",
+                )
+                return
+            if path == "/stress":
+                t0 = time.perf_counter()
+                digest = b""
+                for i in range(STRESS_ITERS):
+                    digest = hashlib.sha256(digest + str(i).encode()).digest()
+                elapsed_ms = (time.perf_counter() - t0) * 1000
+                self._reply(
+                    200,
+                    f"stressed\npod={HOSTNAME}\niters={STRESS_ITERS}\nms={elapsed_ms:.1f}\n",
+                )
+                return
+            self._reply(404, "not found\n")
+
+    if __name__ == "__main__":
+        port = int(os.environ.get("PORT", "8080"))
+        print(f"hpa-web listening on :{port} (pod={HOSTNAME})")
+        ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hpa-web
+  labels:
+    app: hpa-web
+spec:
+  # HPA owns replica count after it is applied; start with 1
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hpa-web
+  template:
+    metadata:
+      labels:
+        app: hpa-web
+    spec:
+      containers:
+        - name: web
+          image: python:3.12-alpine
+          command: ["python3", "/app/server.py"]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+            - name: STRESS_ITERS
+              value: "400000"
+          # python image cold-start can take a few seconds; avoid "connection refused" noise
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            # HPA scales on request% — keep requests low so load is easy to trigger
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          volumeMounts:
+            - name: app
+              mountPath: /app
+              readOnly: true
+      volumes:
+        - name: app
+          configMap:
+            name: hpa-web
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hpa-web
+  labels:
+    app: hpa-web
+spec:
+  type: ClusterIP
+  selector:
+    app: hpa-web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hpa-web
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: hpa-web.test.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hpa-web
+                port:
+                  number: 80
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: hpa-web
+  labels:
+    app: hpa-web
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: hpa-web
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 15
+    scaleDown:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 30
