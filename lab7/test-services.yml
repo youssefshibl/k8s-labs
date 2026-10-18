@@ -1,12 +1,12 @@
 # =============================================================================
-# Lab 7 — Auto-instrumented demo apps (Python + Node.js) + PostgreSQL
+# Lab 7 — Auto-instrumented demo apps (Python + Node.js) + PostgreSQL + Redis
 # =============================================================================
 # Annotations opt each Deployment into OpenTelemetry Operator injection.
 # Instrumentation CR lives in monitoring (see instrumentation.yml).
 #
-# Flow for distributed traces (HTTP + DB spans):
-#   Browser → hello-nodejs (pg) → hello-python (psycopg2) → postgres
-#          → OTLP collector → Jaeger
+# Flow for distributed traces (HTTP + DB + Redis spans):
+#   Browser → hello-nodejs (redis + pg) → hello-python (redis + psycopg2)
+#          → postgres / redis → OTLP collector → Jaeger
 # =============================================================================
 
 apiVersion: v1
@@ -107,7 +107,62 @@ spec:
       targetPort: postgres
 ---
 # -----------------------------------------------------------------------------
-# Python (Flask) — DB ops via psycopg2 (auto-instrumented)
+# Redis (demo cache)
+# -----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: otel-demo
+  labels:
+    app: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7.4-alpine
+          args: ["redis-server", "--save", "", "--appendonly", "no"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: otel-demo
+  labels:
+    app: redis
+spec:
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+---
+# -----------------------------------------------------------------------------
+# Python (Flask) — Postgres + Redis (auto-instrumented)
 # -----------------------------------------------------------------------------
 apiVersion: v1
 kind: ConfigMap
@@ -120,14 +175,28 @@ data:
     import time
 
     import psycopg2
+    import redis
     from flask import Flask, jsonify
 
     app = Flask(__name__)
     DATABASE_URL = os.environ["DATABASE_URL"]
+    REDIS_URL = os.environ.get("REDIS_URL", "redis://redis.otel-demo.svc:6379/0")
+    r = redis.from_url(REDIS_URL, decode_responses=True)
 
 
     def connect():
         return psycopg2.connect(DATABASE_URL)
+
+
+    def wait_redis():
+        for _ in range(30):
+            try:
+                r.ping()
+                return
+            except Exception as exc:
+                print(f"waiting for redis: {exc}")
+                time.sleep(2)
+        raise RuntimeError("redis not ready")
 
 
     def init_db():
@@ -160,6 +229,8 @@ data:
 
     @app.get("/api/hello")
     def hello():
+        visits = r.incr("python:hello:visits")
+        r.set("python:hello:last", str(int(time.time())), ex=3600)
         with connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -170,16 +241,21 @@ data:
                 cur.execute("SELECT count(*) FROM notes")
                 count = cur.fetchone()[0]
             conn.commit()
+        r.set("python:notes:count", str(count), ex=60)
         return jsonify(
             service="hello-python",
             path="/api/hello",
             note_id=note_id,
             notes_count=count,
+            redis_visits=visits,
         )
 
 
     @app.get("/api/notes")
     def list_notes():
+        cached = r.get("python:notes:list")
+        if cached:
+            return jsonify(service="hello-python", notes=cached, cache="hit")
         with connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -188,19 +264,22 @@ data:
                 )
                 rows = [
                     {
-                        "id": r[0],
-                        "service": r[1],
-                        "message": r[2],
-                        "created_at": r[3],
+                        "id": r_[0],
+                        "service": r_[1],
+                        "message": r_[2],
+                        "created_at": r_[3],
                     }
-                    for r in cur.fetchall()
+                    for r_ in cur.fetchall()
                 ]
-        return jsonify(service="hello-python", notes=rows)
+        # store a short summary string so redis GET/SET show in traces
+        r.set("python:notes:list", f"{len(rows)} notes", ex=10)
+        return jsonify(service="hello-python", notes=rows, cache="miss")
 
 
     @app.get("/api/slow")
     def slow():
         time.sleep(0.3)
+        r.setex("python:slow:flag", 30, "1")
         with connect() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT pg_sleep(0.2)")
@@ -214,6 +293,7 @@ data:
 
 
     if __name__ == "__main__":
+        wait_redis()
         init_db()
         app.run(host="0.0.0.0", port=8080)
 ---
@@ -244,7 +324,7 @@ spec:
             - sh
             - -c
             - |
-              pip install --no-cache-dir flask==3.0.3 psycopg2-binary==2.9.9 >/tmp/pip.log 2>&1
+              pip install --no-cache-dir flask==3.0.3 psycopg2-binary==2.9.9 redis==5.1.1 >/tmp/pip.log 2>&1
               exec python /app/app.py
           ports:
             - name: http
@@ -257,11 +337,13 @@ spec:
                 secretKeyRef:
                   name: postgres
                   key: DATABASE_URL
+            - name: REDIS_URL
+              value: redis://redis.otel-demo.svc:6379/0
           readinessProbe:
             httpGet:
               path: /
               port: http
-            initialDelaySeconds: 25
+            initialDelaySeconds: 30
             periodSeconds: 5
           volumeMounts:
             - name: app
@@ -294,7 +376,7 @@ spec:
       targetPort: http
 ---
 # -----------------------------------------------------------------------------
-# Node.js (Express) — pg DB ops + call Python (distributed trace)
+# Node.js (Express) — Redis + pg + call Python (distributed trace)
 # -----------------------------------------------------------------------------
 apiVersion: v1
 kind: ConfigMap
@@ -309,19 +391,22 @@ data:
       "main": "server.js",
       "dependencies": {
         "express": "4.21.0",
-        "pg": "8.13.0"
+        "pg": "8.13.0",
+        "redis": "4.7.0"
       }
     }
   server.js: |
     const express = require("express");
     const http = require("http");
     const { Pool } = require("pg");
+    const { createClient } = require("redis");
 
     const app = express();
     const port = 8080;
     const pythonHost = process.env.PYTHON_HOST || "hello-python.otel-demo.svc";
     const pythonPort = process.env.PYTHON_PORT || "8080";
     const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+    const redis = createClient({ url: process.env.REDIS_URL || "redis://redis.otel-demo.svc:6379/0" });
 
     async function initDb() {
       for (let i = 0; i < 30; i++) {
@@ -343,6 +428,20 @@ data:
       throw new Error("postgres not ready");
     }
 
+    async function initRedis() {
+      for (let i = 0; i < 30; i++) {
+        try {
+          if (!redis.isOpen) await redis.connect();
+          await redis.ping();
+          return;
+        } catch (err) {
+          console.log("waiting for redis:", err.message);
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+      }
+      throw new Error("redis not ready");
+    }
+
     function callPython(path) {
       return new Promise((resolve, reject) => {
         const req = http.request(
@@ -360,17 +459,21 @@ data:
 
     app.get("/", async (_req, res) => {
       try {
+        const visits = await redis.incr("nodejs:visits");
+        await redis.set("nodejs:last_visit", new Date().toISOString(), { EX: 3600 });
         const insert = await pool.query(
           "INSERT INTO notes (service, message) VALUES ($1, $2) RETURNING id",
           ["hello-nodejs", "visit"]
         );
         const upstream = await callPython("/api/hello");
         const count = await pool.query("SELECT count(*)::int AS n FROM notes");
+        await redis.set("nodejs:notes:count", String(count.rows[0].n), { EX: 60 });
         res.json({
           service: "hello-nodejs",
-          message: "hello from node — db + called python",
+          message: "hello from node — redis + db + called python",
           note_id: insert.rows[0].id,
           notes_count: count.rows[0].n,
+          redis_visits: visits,
           upstream,
         });
       } catch (err) {
@@ -380,10 +483,15 @@ data:
 
     app.get("/api/notes", async (_req, res) => {
       try {
+        const cached = await redis.get("nodejs:notes:list");
+        if (cached) {
+          return res.json({ service: "hello-nodejs", notes: cached, cache: "hit" });
+        }
         const result = await pool.query(
           "SELECT id, service, message, created_at::text AS created_at FROM notes ORDER BY id DESC LIMIT 20"
         );
-        res.json({ service: "hello-nodejs", notes: result.rows });
+        await redis.set("nodejs:notes:list", `${result.rows.length} notes`, { EX: 10 });
+        res.json({ service: "hello-nodejs", notes: result.rows, cache: "miss" });
       } catch (err) {
         res.status(500).json({ service: "hello-nodejs", error: String(err) });
       }
@@ -391,7 +499,7 @@ data:
 
     app.get("/healthz", (_req, res) => res.send("ok"));
 
-    initDb()
+    Promise.all([initRedis(), initDb()])
       .then(() => {
         app.listen(port, "0.0.0.0", () => {
           console.log(`hello-nodejs listening on ${port}`);
@@ -447,11 +555,13 @@ spec:
                 secretKeyRef:
                   name: postgres
                   key: DATABASE_URL
+            - name: REDIS_URL
+              value: redis://redis.otel-demo.svc:6379/0
           readinessProbe:
             httpGet:
               path: /healthz
               port: http
-            initialDelaySeconds: 35
+            initialDelaySeconds: 40
             periodSeconds: 5
           volumeMounts:
             - name: config

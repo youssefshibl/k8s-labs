@@ -11,23 +11,26 @@ Depends on **cert-manager** (Operator webhooks) and the shared Ingress / `*.test
 | [`jaeger.yml`](jaeger.yml) | Jaeger all-in-one + Service + Ingress (`jaeger.test.local`) |
 | [`otel-collector.yml`](otel-collector.yml) | `OpenTelemetryCollector` CR — receives OTLP, exports to Jaeger |
 | [`instrumentation.yml`](instrumentation.yml) | `Instrumentation` CR — agent inject + OTLP endpoint |
-| [`test-services.yml`](test-services.yml) | Postgres + auto-instrumented Python / Node demos + Ingress |
+| [`test-services.yml`](test-services.yml) | Postgres + Redis + auto-instrumented Python / Node demos + Ingress |
 
 ## Architecture
 
 ```mermaid
 flowchart LR
   Browser["Browser"]
-  Node["hello-nodejs<br/>inject-nodejs + pg"]
-  Py["hello-python<br/>inject-python + psycopg2"]
-  DB["PostgreSQL<br/>otel-demo"]
-  Coll["OTel Collector<br/>monitoring"]
-  Jaeger["Jaeger<br/>monitoring"]
+  Node["hello-nodejs<br/>pg + redis"]
+  Py["hello-python<br/>psycopg2 + redis"]
+  DB["PostgreSQL"]
+  Redis["Redis"]
+  Coll["OTel Collector"]
+  Jaeger["Jaeger"]
 
   Browser -->|otel-node.test.local| Node
-  Node -->|INSERT / SELECT| DB
+  Node -->|SQL| DB
+  Node -->|GET/SET/INCR| Redis
   Node -->|HTTP /api/hello| Py
-  Py -->|INSERT / SELECT| DB
+  Py -->|SQL| DB
+  Py -->|GET/SET/INCR| Redis
   Node -->|OTLP| Coll
   Py -->|OTLP| Coll
   Coll -->|OTLP| Jaeger
@@ -68,9 +71,10 @@ kubectl -n monitoring wait --for=condition=Available deployment/otel-collector -
 # Auto-instrumentation config
 kubectl apply -f lab7/instrumentation.yml
 
-# Demo apps + Postgres (opt-in via annotations)
+# Demo apps + Postgres + Redis (opt-in via annotations)
 kubectl apply -f lab7/test-services.yml
 kubectl -n otel-demo wait --for=condition=Available deployment/postgres --timeout=120s
+kubectl -n otel-demo wait --for=condition=Available deployment/redis --timeout=120s
 kubectl -n otel-demo wait --for=condition=Available deployment/hello-python --timeout=240s
 kubectl -n otel-demo wait --for=condition=Available deployment/hello-nodejs --timeout=240s
 ```
@@ -92,7 +96,7 @@ kubectl get pod -n otel-demo -l app=hello-nodejs -o jsonpath='{.items[0].spec.in
 ### Generate traces
 
 ```bash
-# Distributed trace: Node (pg INSERT) → Python (pg INSERT/SELECT) → Postgres
+# Distributed trace: Node (redis + pg) → Python (redis + pg)
 curl -s http://otel-node.test.local/ | jq .
 
 # Python DB endpoints
@@ -115,16 +119,16 @@ http://jaeger.test.local
 
 1. **Service** → `hello-nodejs` or `hello-python`
 2. **Find Traces** — open a `hello-nodejs` `GET /` span
-3. You should see **HTTP** child spans into Python **and** **PostgreSQL** spans (`INSERT` / `SELECT`) from both services
+3. You should see **HTTP** into Python, plus **PostgreSQL** (`INSERT` / `SELECT`) and **Redis** (`INCR` / `SET` / `GET`) spans
 4. Or open **System Architecture** for the service graph
 
 ## How it works
 
 1. **OpenTelemetry Operator** watches pods for language annotations and injects an init container + env (`OTEL_*`).
 2. **Instrumentation** CR points agents at the in-cluster Collector (`otel-collector:4318` OTLP/HTTP).
-3. Apps emit spans with **no code changes** — Flask / Express **and** `psycopg2` / `pg` DB calls are auto-instrumented.
+3. Apps emit spans with **no code changes** — Flask / Express, `psycopg2` / `pg`, and `redis` clients are auto-instrumented.
 4. **Collector** batches and forwards traces to **Jaeger** over OTLP gRPC.
-5. **Jaeger UI** shows search, trace waterfall (HTTP + SQL), and service graph.
+5. **Jaeger UI** shows search, trace waterfall (HTTP + SQL + Redis), and service graph.
 
 Opt-in annotations used here:
 
