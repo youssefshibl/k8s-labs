@@ -1,4 +1,4 @@
-# Lab 5 — MongoDB & PostgreSQL exporters + Grafana dashboards
+# Lab 5 — MongoDB, PostgreSQL & Redis exporters + Grafana dashboards
 
 Export **database-specific** metrics into the Prometheus / Grafana stack from **[lab4](../lab4/)**.
 
@@ -6,6 +6,7 @@ Export **database-specific** metrics into the Prometheus / Grafana stack from **
 |----|----------|-----------|
 | MongoDB | [gurjarchetan/mongodb-exporter](https://github.com/gurjarchetan/mongodb-exporter) | [25227 — Prod Overview](https://grafana.com/grafana/dashboards/25227-mongodb-prod-overview/) |
 | PostgreSQL | [postgres_exporter](https://github.com/prometheus-community/postgres_exporter) | [9628 — PostgreSQL Database](https://grafana.com/grafana/dashboards/9628-postgresql-database/) |
+| Redis | [redis_exporter](https://github.com/oliver006/redis_exporter) | **Redis** — hit ratio, memory, CPU, keyspace, command latency (based on [763](https://grafana.com/grafana/dashboards/763-redis-dashboard-for-prometheus-redis-exporter-1-x/)) |
 
 ## Files
 
@@ -16,6 +17,8 @@ Export **database-specific** metrics into the Prometheus / Grafana stack from **
 | [`mongodb/dashboards/`](mongodb/dashboards/) | Grafana board 25227 |
 | [`postgresql/postgres-exporter.yml`](postgresql/postgres-exporter.yml) | PostgreSQL + exporter + ServiceMonitor |
 | [`postgresql/dashboards/`](postgresql/dashboards/) | Grafana board 9628 (adapted for Grafana 11) |
+| [`redis/redis-exporter.yml`](redis/redis-exporter.yml) | Redis + exporter + ServiceMonitor |
+| [`redis/dashboards/`](redis/dashboards/) | Grafana board 763 |
 
 ## Architecture
 
@@ -23,15 +26,19 @@ Export **database-specific** metrics into the Prometheus / Grafana stack from **
 flowchart LR
   Mongo["mongodb :27017"]
   PG["postgresql :5432"]
+  Redis["redis :6379"]
   MExp["mongodb-exporter :9216"]
   PExp["postgres-exporter :9187"]
+  RExp["redis-exporter :9121"]
   Prom["Prometheus<br/>lab4"]
   Graf["Grafana"]
 
   MExp --> Mongo
   PExp --> PG
+  RExp --> Redis
   Prom -->|ServiceMonitor| MExp
   Prom -->|ServiceMonitor| PExp
+  Prom -->|ServiceMonitor| RExp
   Graf -->|query| Prom
 ```
 
@@ -62,12 +69,18 @@ kubectl apply -f mongodb/mongodb-exporter.yml
 # PostgreSQL + exporter (includes the DB)
 kubectl apply -f postgresql/postgres-exporter.yml
 
+# Redis + exporter (includes the DB)
+kubectl apply -f redis/redis-exporter.yml
+
 # Grafana boards (separate ConfigMaps — annotation size limit)
 kubectl create configmap grafana-dashboards-mongodb -n monitoring \
   --from-file=mongodb/dashboards/ \
   --dry-run=client -o yaml | kubectl apply -f -
 kubectl create configmap grafana-dashboards-postgresql -n monitoring \
   --from-file=postgresql/dashboards/ \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl create configmap grafana-dashboards-redis -n monitoring \
+  --from-file=redis/dashboards/ \
   --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n monitoring rollout restart deployment/grafana
 ```
@@ -78,6 +91,7 @@ From **repo root**:
 kubectl apply -f lab5/mongodb/mongodb.yml
 kubectl apply -f lab5/mongodb/mongodb-exporter.yml
 kubectl apply -f lab5/postgresql/postgres-exporter.yml
+kubectl apply -f lab5/redis/redis-exporter.yml
 
 kubectl create configmap grafana-dashboards-mongodb -n monitoring \
   --from-file=lab5/mongodb/dashboards/ \
@@ -85,23 +99,29 @@ kubectl create configmap grafana-dashboards-mongodb -n monitoring \
 kubectl create configmap grafana-dashboards-postgresql -n monitoring \
   --from-file=lab5/postgresql/dashboards/ \
   --dry-run=client -o yaml | kubectl apply -f -
+kubectl create configmap grafana-dashboards-redis -n monitoring \
+  --from-file=lab5/redis/dashboards/ \
+  --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n monitoring rollout restart deployment/grafana
 ```
 
 Check:
 
 ```bash
-kubectl get pods,svc,servicemonitor -l 'app in (mongodb,mongodb-exporter,postgresql,postgres-exporter)'
+kubectl get pods,svc,servicemonitor -l 'app in (mongodb,mongodb-exporter,postgresql,postgres-exporter,redis,redis-exporter)'
 kubectl wait --for=condition=Available deployment/mongodb --timeout=120s
 kubectl wait --for=condition=Available deployment/mongodb-exporter --timeout=120s
 kubectl wait --for=condition=Available deployment/postgresql --timeout=120s
 kubectl wait --for=condition=Available deployment/postgres-exporter --timeout=120s
+kubectl wait --for=condition=Available deployment/redis --timeout=120s
+kubectl wait --for=condition=Available deployment/redis-exporter --timeout=120s
 ```
 
 Prometheus → **Status → Targets**:
 
 - `serviceMonitor/default/mongodb-exporter` — UP
 - `serviceMonitor/default/postgres-exporter` — UP
+- `serviceMonitor/default/redis-exporter` — UP
 
 ## Access
 
@@ -110,22 +130,24 @@ Prometheus → **Status → Targets**:
 | Grafana | http://grafana.test.local (`admin` / `admin`) |
 | Prometheus | http://prometheus.test.local |
 
-Dashboards: **MongoDB — Prod Overview**, **PostgreSQL Database**.
+Dashboards: **MongoDB — Prod Overview**, **PostgreSQL Database**, **Redis**.
 
 Default credentials:
 
-| DB | User | Password | Database |
-|----|------|----------|----------|
+| DB | User | Password | Database / notes |
+|----|------|----------|------------------|
 | MongoDB | `admin` | `changeme` | `testdb` |
 | PostgreSQL | `app` | `changeme` | `appdb` |
+| Redis | — | — | no auth (lab default); `redis.default.svc:6379` |
 
 ## Cleanup
 
 ```bash
+kubectl delete -f redis/redis-exporter.yml --ignore-not-found
 kubectl delete -f postgresql/postgres-exporter.yml --ignore-not-found
 kubectl delete -f mongodb/mongodb-exporter.yml --ignore-not-found
 kubectl delete -f mongodb/mongodb.yml --ignore-not-found
-kubectl delete configmap grafana-dashboards-mongodb grafana-dashboards-postgresql \
+kubectl delete configmap grafana-dashboards-mongodb grafana-dashboards-postgresql grafana-dashboards-redis \
   -n monitoring --ignore-not-found
 kubectl -n monitoring rollout restart deployment/grafana
 ```

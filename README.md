@@ -8,7 +8,7 @@ Local Kubernetes labs on kind (`kind-dev`) with MetalLB + nginx Ingress.
 | [lab2](lab2/) | Web app (mongo-express) connected to MongoDB |
 | [lab3](lab3/) | Stateful MongoDB + TLS via cert-manager (`test-web.test.local`) |
 | [lab4](lab4/) | Prometheus + Grafana for Kubernetes (3 pod/workload dashboards) |
-| [lab5](lab5/) | MongoDB & PostgreSQL exporters + Grafana DB dashboards |
+| [lab5](lab5/) | MongoDB, PostgreSQL & Redis exporters + Grafana DB dashboards |
 | [lab6](lab6/) | All container logs → Grafana (Loki + Promtail) |
 | [lab7](lab7/) | OpenTelemetry Operator + Jaeger traces (auto-instrumentation demos) |
 | [lab8](lab8/) | Horizontal Pod Autoscaler — CPU web app + stress Job |
@@ -56,8 +56,10 @@ flowchart TB
   subgraph lab5 [Lab 5]
     L5Mongo["mongodb + mongodb-exporter"]
     L5PG["postgresql + postgres-exporter"]
+    L5Redis["redis + redis-exporter"]
     L5Mongo --> Prom
     L5PG --> Prom
+    L5Redis --> Prom
   end
 
   subgraph lab6 [Lab 6]
@@ -110,7 +112,7 @@ kubectl create configmap grafana-dashboards -n monitoring \
   --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -f lab4/grafana.yml
 
-# lab5 — MongoDB / PostgreSQL exporters + DB dashboards (see lab5/README.md)
+# lab5 — MongoDB / PostgreSQL / Redis exporters + DB dashboards (see lab5/README.md)
 # lab6 — container logs → Grafana via Loki (see lab6/README.md)
 # lab7 — OTel Operator + Jaeger traces (see lab7/README.md)
 # lab8 — HPA + stress Job (see lab8/README.md; needs metrics-server)

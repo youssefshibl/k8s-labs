@@ -7,7 +7,7 @@
 #
 # Apply (from repo root — ConfigMap first so the Deployment can mount it).
 # Core boards: lab4/dashboards/ (3 boards).
-# MongoDB / PostgreSQL boards are optional (lab5) via separate ConfigMaps
+# MongoDB / PostgreSQL / Redis boards are optional (lab5) via separate ConfigMaps
 # (avoids kubectl apply annotation size limit).
 #
 #   kubectl create configmap grafana-dashboards -n monitoring \
@@ -19,6 +19,9 @@
 #     --dry-run=client -o yaml | kubectl apply -f -
 #   kubectl create configmap grafana-dashboards-postgresql -n monitoring \
 #     --from-file=lab5/postgresql/dashboards/ \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl create configmap grafana-dashboards-redis -n monitoring \
+#     --from-file=lab5/redis/dashboards/ \
 #     --dry-run=client -o yaml | kubectl apply -f -
 #   kubectl create configmap grafana-dashboards-logs -n monitoring \
 #     --from-file=lab6/dashboards/ \
@@ -179,6 +182,9 @@ spec:
                   optional: true
               - configMap:
                   name: grafana-dashboards-postgresql
+                  optional: true
+              - configMap:
+                  name: grafana-dashboards-redis
                   optional: true
               - configMap:
                   name: grafana-dashboards-logs

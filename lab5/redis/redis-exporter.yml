@@ -1,0 +1,179 @@
+# =============================================================================
+# Lab 5 — Redis + redis_exporter (lab DB + metrics)
+# =============================================================================
+# Prerequisites:
+#   - Prometheus Operator stack (lab4/)
+#
+# Apply (from repo root):
+#   kubectl apply -f lab5/redis/redis-exporter.yml
+#
+# Grafana board:
+#   kubectl create configmap grafana-dashboards-redis -n monitoring \
+#     --from-file=lab5/redis/dashboards/ \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl -n monitoring rollout restart deployment/grafana
+#
+# Metrics: http://redis-exporter.default.svc:9121/metrics
+# Dashboard: Grafana → "Redis Dashboard for Prometheus Redis Exporter 1.x" (grafana.com/763)
+# Exporter: oliver006/redis_exporter
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# BLOCK 1 — Deployment: Redis (lab cache / key-value store)
+# -----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: default
+  labels:
+    app: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7.4-alpine
+          args: ["redis-server", "--save", "", "--appendonly", "no"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+# -----------------------------------------------------------------------------
+# BLOCK 2 — Service: Redis
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: default
+  labels:
+    app: redis
+spec:
+  type: ClusterIP
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+---
+# -----------------------------------------------------------------------------
+# BLOCK 3 — Deployment: redis-exporter
+# -----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-exporter
+  namespace: default
+  labels:
+    app: redis-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis-exporter
+  template:
+    metadata:
+      labels:
+        app: redis-exporter
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9121"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: redis-exporter
+          image: oliver006/redis_exporter:v1.94.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: REDIS_ADDR
+              value: redis://redis.default.svc:6379
+          ports:
+            - name: metrics
+              containerPort: 9121
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: metrics
+            initialDelaySeconds: 15
+            periodSeconds: 20
+---
+# -----------------------------------------------------------------------------
+# BLOCK 4 — Service: redis-exporter
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-exporter
+  namespace: default
+  labels:
+    app: redis-exporter
+spec:
+  type: ClusterIP
+  selector:
+    app: redis-exporter
+  ports:
+    - name: metrics
+      port: 9121
+      targetPort: metrics
+---
+# -----------------------------------------------------------------------------
+# BLOCK 5 — ServiceMonitor: scrape redis-exporter
+# -----------------------------------------------------------------------------
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: redis-exporter
+  namespace: default
+  labels:
+    app: redis-exporter
+spec:
+  selector:
+    matchLabels:
+      app: redis-exporter
+  namespaceSelector:
+    matchNames:
+      - default
+  endpoints:
+    - port: metrics
+      interval: 15s
+      path: /metrics
+      scrapeTimeout: 10s
