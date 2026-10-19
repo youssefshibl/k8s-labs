@@ -1,0 +1,1551 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Redis Streams (redis_exporter XINFO) + worker e2e latency (stream enter \u2192 group ACK). Hover (i) on panels for details.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "panels": [],
+      "title": "Stream overview",
+      "type": "row",
+      "description": "High-level counters for the selected Redis stream (from XINFO STREAM / GROUPS)."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 100
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          },
+          "unit": "short",
+          "description": "redis_stream_length \u2014 Number of entries currently stored in the stream (XLEN / XINFO length). Grows with XADD; shrinks only if entries are trimmed/deleted (workers ACK but do not remove entries by default)."
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "Stream length",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "redis_stream_length{job=\"stream-redis-exporter\", stream=~\"$stream\"}",
+          "legendFormat": "{{stream}}",
+          "refId": "A"
+        }
+      ],
+      "description": "redis_stream_length \u2014 Number of entries currently stored in the stream (XLEN / XINFO length). Grows with XADD; shrinks only if entries are trimmed/deleted (workers ACK but do not remove entries by default)."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short",
+          "description": "redis_stream_groups \u2014 How many consumer groups exist on this stream (XINFO STREAM groups). Lab9 uses the workers group."
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "Consumer groups",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "redis_stream_groups{job=\"stream-redis-exporter\", stream=~\"$stream\"}",
+          "legendFormat": "{{stream}}",
+          "refId": "A"
+        }
+      ],
+      "description": "redis_stream_groups \u2014 How many consumer groups exist on this stream (XINFO STREAM groups). Lab9 uses the workers group."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "short",
+          "description": "redis_stream_group_lag \u2014 Messages still waiting to be delivered to the group (not yet read via XREADGROUP >). High lag means producers are ahead of consumers."
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "Group lag",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(redis_stream_group_lag{job=\"stream-redis-exporter\", stream=~\"$stream\", group=~\"$group\"}) or vector(0)",
+          "legendFormat": "lag",
+          "refId": "A"
+        }
+      ],
+      "description": "redis_stream_group_lag \u2014 Messages still waiting to be delivered to the group (not yet read via XREADGROUP >). High lag means producers are ahead of consumers."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 20
+              }
+            ]
+          },
+          "unit": "short",
+          "description": "redis_stream_group_messages_pending \u2014 Entries in the Pending Entries List (PEL): delivered to a consumer but not yet XACK'd. High pending often means slow or stuck workers."
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
+      "id": 5,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "Pending messages",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(redis_stream_group_messages_pending{job=\"stream-redis-exporter\", stream=~\"$stream\", group=~\"$group\"}) or vector(0)",
+          "legendFormat": "pending",
+          "refId": "A"
+        }
+      ],
+      "description": "redis_stream_group_messages_pending \u2014 Entries in the Pending Entries List (PEL): delivered to a consumer but not yet XACK'd. High pending often means slow or stuck workers."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "purple",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short",
+          "description": "redis_stream_group_consumers \u2014 Active consumers registered in the selected consumer group (XINFO GROUPS consumers)."
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "id": 6,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "Consumers",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(redis_stream_group_consumers{job=\"stream-redis-exporter\", stream=~\"$stream\", group=~\"$group\"}) or vector(0)",
+          "legendFormat": "consumers",
+          "refId": "A"
+        }
+      ],
+      "description": "redis_stream_group_consumers \u2014 Active consumers registered in the selected consumer group (XINFO GROUPS consumers)."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short",
+          "description": "redis_stream_entries_added_total \u2014 Lifetime count of entries ever added to the stream (XADD). Monotonic; unlike length, it does not shrink when entries are trimmed."
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "id": 7,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "Entries added (total)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "redis_stream_entries_added_total{job=\"stream-redis-exporter\", stream=~\"$stream\"}",
+          "legendFormat": "{{stream}}",
+          "refId": "A"
+        }
+      ],
+      "description": "redis_stream_entries_added_total \u2014 Lifetime count of entries ever added to the stream (XADD). Monotonic; unlike length, it does not shrink when entries are trimmed."
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "id": 10,
+      "panels": [],
+      "title": "Stream & group time series",
+      "type": "row",
+      "description": "Trends over time for stream size, backlog (lag/pending), and produce/consume activity."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "short",
+          "description": "redis_stream_length over time \u2014 Watch how the stream fills when you burst POSTs to stream-api, and whether it stays large (entries are kept after ACK unless trimmed)."
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "title": "Stream length",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "redis_stream_length{job=\"stream-redis-exporter\", stream=~\"$stream\"}",
+          "legendFormat": "{{stream}}",
+          "refId": "A"
+        }
+      ],
+      "description": "redis_stream_length over time \u2014 Watch how the stream fills when you burst POSTs to stream-api, and whether it stays large (entries are kept after ACK unless trimmed)."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "short",
+          "description": "redis_stream_group_lag over time \u2014 Backlog of undelivered messages for the group. Spikes during produce bursts; should fall as workers catch up."
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "title": "Group lag",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "redis_stream_group_lag{job=\"stream-redis-exporter\", stream=~\"$stream\", group=~\"$group\"}",
+          "legendFormat": "{{group}}",
+          "refId": "A"
+        }
+      ],
+      "description": "redis_stream_group_lag over time \u2014 Backlog of undelivered messages for the group. Spikes during produce bursts; should fall as workers catch up."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "short",
+          "description": "redis_stream_group_messages_pending over time \u2014 Delivered-but-unacked messages for the group. Rises while workers sleep (PROCESS_SECONDS) and falls after XACK."
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 14
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "title": "Pending messages (group)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "redis_stream_group_messages_pending{job=\"stream-redis-exporter\", stream=~\"$stream\", group=~\"$group\"}",
+          "legendFormat": "{{group}}",
+          "refId": "A"
+        }
+      ],
+      "description": "redis_stream_group_messages_pending over time \u2014 Delivered-but-unacked messages for the group. Rises while workers sleep (PROCESS_SECONDS) and falls after XACK."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "short",
+          "description": "redis_stream_group_entries_read \u2014 Total entries the consumer group has read from the stream so far (XINFO GROUPS entries-read). Increases as workers consume."
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 14
+      },
+      "id": 14,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "title": "Entries read (group)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "redis_stream_group_entries_read{job=\"stream-redis-exporter\", stream=~\"$stream\", group=~\"$group\"}",
+          "legendFormat": "{{group}}",
+          "refId": "A"
+        }
+      ],
+      "description": "redis_stream_group_entries_read \u2014 Total entries the consumer group has read from the stream so far (XINFO GROUPS entries-read). Increases as workers consume."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "ops",
+          "description": "rate(redis_stream_entries_added_total[1m]) \u2014 Approximate XADD rate (entries/sec) for the stream. Useful while load-testing with curl bursts."
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 14
+      },
+      "id": 15,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "title": "Entries added rate",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "rate(redis_stream_entries_added_total{job=\"stream-redis-exporter\", stream=~\"$stream\"}[1m])",
+          "legendFormat": "{{stream}}",
+          "refId": "A"
+        }
+      ],
+      "description": "rate(redis_stream_entries_added_total[1m]) \u2014 Approximate XADD rate (entries/sec) for the stream. Useful while load-testing with curl bursts."
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "id": 20,
+      "panels": [],
+      "title": "Consumers",
+      "type": "row",
+      "description": "Per-consumer PEL and idle metrics from XINFO CONSUMERS."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 40,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          },
+          "unit": "short",
+          "description": "redis_stream_group_consumer_messages_pending \u2014 Pending (unacked) messages owned by each consumer. Uneven bars can mean one worker is stuck or slower."
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 23
+      },
+      "id": 21,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "title": "Pending per consumer",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "redis_stream_group_consumer_messages_pending{job=\"stream-redis-exporter\", stream=~\"$stream\", group=~\"$group\"}",
+          "legendFormat": "{{consumer}}",
+          "refId": "A"
+        }
+      ],
+      "description": "redis_stream_group_consumer_messages_pending \u2014 Pending (unacked) messages owned by each consumer. Uneven bars can mean one worker is stuck or slower."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "s",
+          "description": "redis_stream_group_consumer_idle_seconds \u2014 Seconds since each consumer last interacted with the group. High idle may mean a worker is idle, crashed, or blocked."
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 23
+      },
+      "id": 22,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "title": "Consumer idle time",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "redis_stream_group_consumer_idle_seconds{job=\"stream-redis-exporter\", stream=~\"$stream\", group=~\"$group\"}",
+          "legendFormat": "{{consumer}}",
+          "refId": "A"
+        }
+      ],
+      "description": "redis_stream_group_consumer_idle_seconds \u2014 Seconds since each consumer last interacted with the group. High idle may mean a worker is idle, crashed, or blocked."
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "id": 30,
+      "panels": [],
+      "title": "Stream IDs & structure",
+      "type": "row",
+      "description": "Stream entry ID timestamps (ms epoch of Redis stream IDs) and internal radix-tree structure from XINFO STREAM."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short",
+          "description": "redis_stream_first_entry_id \u2014 Millisecond part of the oldest entry ID still in the stream. Changes if the stream is trimmed from the left."
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 32
+      },
+      "id": 31,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "First entry ID (ms epoch)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "redis_stream_first_entry_id{job=\"stream-redis-exporter\", stream=~\"$stream\"}",
+          "legendFormat": "first",
+          "refId": "A"
+        }
+      ],
+      "description": "redis_stream_first_entry_id \u2014 Millisecond part of the oldest entry ID still in the stream. Changes if the stream is trimmed from the left."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short",
+          "description": "redis_stream_last_entry_id \u2014 Millisecond part of the newest entry ID currently in the stream."
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 32
+      },
+      "id": 32,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "Last entry ID (ms epoch)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "redis_stream_last_entry_id{job=\"stream-redis-exporter\", stream=~\"$stream\"}",
+          "legendFormat": "last",
+          "refId": "A"
+        }
+      ],
+      "description": "redis_stream_last_entry_id \u2014 Millisecond part of the newest entry ID currently in the stream."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short",
+          "description": "redis_stream_last_generated_id \u2014 Millisecond part of the last ID Redis assigned on XADD (may match last entry unless deletions occurred)."
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 32
+      },
+      "id": 33,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "Last generated ID",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "redis_stream_last_generated_id{job=\"stream-redis-exporter\", stream=~\"$stream\"}",
+          "legendFormat": "generated",
+          "refId": "A"
+        }
+      ],
+      "description": "redis_stream_last_generated_id \u2014 Millisecond part of the last ID Redis assigned on XADD (may match last entry unless deletions occurred)."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short",
+          "description": "redis_stream_group_last_delivered_id \u2014 Millisecond part of the last ID delivered to the consumer group. Compare with last generated to reason about lag."
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 32
+      },
+      "id": 34,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "Last delivered ID (group)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "redis_stream_group_last_delivered_id{job=\"stream-redis-exporter\", stream=~\"$stream\", group=~\"$group\"}",
+          "legendFormat": "{{group}}",
+          "refId": "A"
+        }
+      ],
+      "description": "redis_stream_group_last_delivered_id \u2014 Millisecond part of the last ID delivered to the consumer group. Compare with last generated to reason about lag."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "short",
+          "description": "redis_stream_radix_tree_keys / redis_stream_radix_tree_nodes \u2014 Internal radix-tree size Redis uses to store the stream. Grows with stream data; useful for structure/memory insight."
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 36
+      },
+      "id": 35,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "title": "Radix tree (keys / nodes)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "redis_stream_radix_tree_keys{job=\"stream-redis-exporter\", stream=~\"$stream\"}",
+          "legendFormat": "keys",
+          "refId": "A"
+        },
+        {
+          "expr": "redis_stream_radix_tree_nodes{job=\"stream-redis-exporter\", stream=~\"$stream\"}",
+          "legendFormat": "nodes",
+          "refId": "B"
+        }
+      ],
+      "description": "redis_stream_radix_tree_keys / redis_stream_radix_tree_nodes \u2014 Internal radix-tree size Redis uses to store the stream. Grows with stream data; useful for structure/memory insight."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "short",
+          "description": "redis_stream_group_consumers over time \u2014 How many consumers are in the group. Changes when you scale stream-worker replicas (after they join the group)."
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 36
+      },
+      "id": 36,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "title": "Group consumers count",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "redis_stream_group_consumers{job=\"stream-redis-exporter\", stream=~\"$stream\", group=~\"$group\"}",
+          "legendFormat": "{{group}}",
+          "refId": "A"
+        }
+      ],
+      "description": "redis_stream_group_consumers over time \u2014 How many consumers are in the group. Changes when you scale stream-worker replicas (after they join the group)."
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 44
+      },
+      "id": 100,
+      "panels": [],
+      "title": "E2E latency (stream enter \u2192 group ACK)",
+      "type": "row",
+      "description": "Worker-exported histogram: time from XADD (produced_at / stream id) until XACK in the consumer group. Average = rate(sum)/rate(count)."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "stream_message_e2e_latency_seconds \u2014 Average seconds from message entering the Redis stream until XACK in this consumer group (sum/count over all observed ACKs on worker pods).",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "orange",
+                "value": 15
+              },
+              {
+                "color": "red",
+                "value": 60
+              }
+            ]
+          },
+          "unit": "s",
+          "description": "Average e2e latency (enter stream \u2192 ACK) for the selected group."
+        }
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 45
+      },
+      "id": 101,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "Avg e2e latency",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(stream_message_e2e_latency_seconds_sum{stream=~\"$stream\", group=~\"$group\", job=\"stream-worker\"}) / sum(stream_message_e2e_latency_seconds_count{stream=~\"$stream\", group=~\"$group\", job=\"stream-worker\"})",
+          "legendFormat": "avg",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "stream_message_e2e_latency_seconds \u2014 p50 (histogram_quantile 0.50) of enter\u2192ACK latency for the selected group.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 30
+              }
+            ]
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 45
+      },
+      "id": 102,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "p50 e2e latency",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(stream_message_e2e_latency_seconds_bucket{stream=~\"$stream\", group=~\"$group\", job=\"stream-worker\"}[5m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "stream_message_e2e_latency_seconds \u2014 p95 (histogram_quantile 0.95) of enter\u2192ACK latency for the selected group.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 60
+              }
+            ]
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 45
+      },
+      "id": 103,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "p95 e2e latency",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(stream_message_e2e_latency_seconds_bucket{stream=~\"$stream\", group=~\"$group\", job=\"stream-worker\"}[5m])))",
+          "legendFormat": "p95",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "stream_messages_acked_total \u2014 ACK rate (messages/sec) by consumer group.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "ops"
+        }
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 45
+      },
+      "id": 104,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "ACK rate",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(rate(stream_messages_acked_total{stream=~\"$stream\", group=~\"$group\", job=\"stream-worker\"}[5m]))",
+          "legendFormat": "ack/s",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Average e2e latency over time per consumer group \u2014 how long messages wait from XADD until XACK.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "s",
+          "description": "Avg seconds from stream enter to ACK."
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 50
+      },
+      "id": 105,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "title": "Avg e2e latency by group",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (group) (stream_message_e2e_latency_seconds_sum{stream=~\"$stream\", group=~\"$group\", job=\"stream-worker\"}) / sum by (group) (stream_message_e2e_latency_seconds_count{stream=~\"$stream\", group=~\"$group\", job=\"stream-worker\"})",
+          "legendFormat": "{{group}} (avg)",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (group) (rate(stream_message_e2e_latency_seconds_sum{stream=~\"$stream\", group=~\"$group\", job=\"stream-worker\"}[5m])) / sum by (group) (rate(stream_message_e2e_latency_seconds_count{stream=~\"$stream\", group=~\"$group\", job=\"stream-worker\"}[5m]))",
+          "legendFormat": "{{group}} (5m)",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "p50 / p95 e2e latency over time for the selected group.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 50
+      },
+      "id": 106,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "title": "E2E latency percentiles",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(stream_message_e2e_latency_seconds_bucket{stream=~\"$stream\", group=~\"$group\", job=\"stream-worker\"}[5m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(stream_message_e2e_latency_seconds_bucket{stream=~\"$stream\", group=~\"$group\", job=\"stream-worker\"}[5m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(stream_message_e2e_latency_seconds_bucket{stream=~\"$stream\", group=~\"$group\", job=\"stream-worker\"}[5m])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": [
+    "redis",
+    "streams",
+    "lab9"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": "jobs",
+          "value": "jobs"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(redis_stream_length{job=\"stream-redis-exporter\"}, stream)",
+        "includeAll": false,
+        "name": "stream",
+        "query": {
+          "query": "label_values(redis_stream_length{job=\"stream-redis-exporter\"}, stream)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "type": "query",
+        "label": "Stream",
+        "description": "Redis stream key scraped by redis_exporter (lab9 default: jobs)."
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "workers",
+          "value": "workers"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(redis_stream_group_lag{job=\"stream-redis-exporter\",stream=~\"$stream\"}, group)",
+        "includeAll": true,
+        "allValue": ".*",
+        "name": "group",
+        "query": {
+          "query": "label_values(redis_stream_group_lag{job=\"stream-redis-exporter\",stream=~\"$stream\"}, group)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "type": "query",
+        "label": "Consumer group",
+        "description": "Consumer group name (lab9 default: workers). Choose All to sum/show every group."
+      }
+    ]
+  },
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Redis Streams",
+  "uid": "lab9-redis-streams",
+  "version": 6,
+  "weekStart": ""
+}

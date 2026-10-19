@@ -12,6 +12,7 @@ Local Kubernetes labs on kind (`kind-dev`) with MetalLB + nginx Ingress.
 | [lab6](lab6/) | All container logs → Grafana (Loki + Promtail) |
 | [lab7](lab7/) | OpenTelemetry Operator + Jaeger traces (auto-instrumentation demos) |
 | [lab8](lab8/) | Horizontal Pod Autoscaler — CPU web app + stress Job |
+| [lab9](lab9/) | Redis Streams — producer API + workers + stream dashboard |
 
 ## Architecture overview
 
@@ -83,6 +84,15 @@ flowchart TB
     HPA --> HpaWeb
   end
 
+  subgraph lab9 [Lab 9]
+    StreamRedis["stream-redis + exporter"]
+    StreamAPI["stream-api<br/>POST /messages"]
+    StreamWorkers["stream-worker ×2"]
+    StreamAPI -->|"XADD"| StreamRedis
+    StreamWorkers -->|"XREADGROUP"| StreamRedis
+    StreamRedis -->|"redis_stream_*"| Prom
+  end
+
   DNS --> LB --> IC
   IC --> L1Ing
   IC --> L2Ing
@@ -116,6 +126,7 @@ kubectl apply -f lab4/grafana.yml
 # lab6 — container logs → Grafana via Loki (see lab6/README.md)
 # lab7 — OTel Operator + Jaeger traces (see lab7/README.md)
 # lab8 — HPA + stress Job (see lab8/README.md; needs metrics-server)
+# lab9 — Redis Streams (own Redis + producer/worker/dashboard; see lab9/README.md)
 
 # dashboard UI (after Dashboard + local CA are installed)
 kubectl apply -f setup/dashboard/admin-user.yml

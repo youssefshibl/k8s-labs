@@ -1,0 +1,571 @@
+# =============================================================================
+# Lab 9 — Redis Streams: producer API + worker (Grafana dashboard separate)
+# =============================================================================
+# Prerequisites:
+#   - Redis + Insight from lab9/redis.yml (stream-redis.default.svc:6379)
+#   - ingress-nginx + *.test.local DNS
+#   - Grafana board: lab9/dashboards/ (see README)
+#
+# Apply (from repo root):
+#   kubectl apply -f lab9/main.yml
+#
+# Push a job:  curl -X POST http://stream-api.test.local/messages \
+#   -H 'Content-Type: application/json' -d '{"body":"hello"}'
+# Dashboard:   Grafana → "Redis Streams"
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Shared env defaults (referenced by apps)
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stream-lab-config
+  labels:
+    app: stream-lab
+data:
+  REDIS_HOST: "stream-redis.default.svc"
+  REDIS_PORT: "6379"
+  STREAM: "jobs"
+  GROUP: "workers"
+  PROCESS_SECONDS: "3"
+  BATCH_SIZE: "100"
+
+---
+# -----------------------------------------------------------------------------
+# Producer API — POST /messages → XADD to Redis stream
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stream-api
+  labels:
+    app: stream-api
+data:
+  server.py: |
+    #!/usr/bin/env python3
+    """HTTP producer: POST /messages pushes an entry onto a Redis stream."""
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import json
+    import os
+    import time
+    import uuid
+
+    import redis
+
+    HOSTNAME = os.environ.get("HOSTNAME", "unknown")
+    STREAM = os.environ.get("STREAM", "jobs")
+    REDIS_HOST = os.environ.get("REDIS_HOST", "stream-redis.default.svc")
+    REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
+
+    r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, fmt, *args):
+            print(f"{self.address_string()} {fmt % args}")
+
+        def _reply(self, code, body, content_type="application/json; charset=utf-8"):
+            if isinstance(body, (dict, list)):
+                data = json.dumps(body, indent=2).encode("utf-8")
+            else:
+                data = body.encode("utf-8") if isinstance(body, str) else body
+            self.send_response(code)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("X-Pod", HOSTNAME)
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _read_json(self):
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw = self.rfile.read(length) if length else b""
+            if not raw:
+                return {}
+            try:
+                return json.loads(raw.decode("utf-8"))
+            except json.JSONDecodeError:
+                # plain text body as message
+                return {"body": raw.decode("utf-8", errors="replace")}
+
+        def do_GET(self):
+            path = self.path.split("?", 1)[0]
+            if path in ("/", "/healthz"):
+                try:
+                    r.ping()
+                    redis_ok = True
+                except Exception as e:
+                    redis_ok = False
+                    err = str(e)
+                payload = {
+                    "service": "stream-api",
+                    "pod": HOSTNAME,
+                    "stream": STREAM,
+                    "redis": f"{REDIS_HOST}:{REDIS_PORT}",
+                    "redis_ok": redis_ok,
+                    "usage": {
+                        "POST /messages": '{"body":"hello","meta":{...}}',
+                        "GET /healthz": "liveness",
+                    },
+                }
+                if not redis_ok:
+                    payload["error"] = err
+                self._reply(200 if redis_ok else 503, payload)
+                return
+            self._reply(404, {"error": "not found"})
+
+        def do_POST(self):
+            path = self.path.split("?", 1)[0]
+            if path != "/messages":
+                self._reply(404, {"error": "not found"})
+                return
+            payload = self._read_json()
+            body = payload.get("body", payload.get("message", ""))
+            if body == "" or body is None:
+                self._reply(400, {"error": "missing body (JSON field 'body' or 'message')"})
+                return
+            msg_id = str(uuid.uuid4())
+            fields = {
+                "id": msg_id,
+                "body": str(body),
+                "produced_by": HOSTNAME,
+                "produced_at": str(time.time()),
+            }
+            meta = payload.get("meta")
+            if isinstance(meta, dict):
+                fields["meta"] = json.dumps(meta)
+            elif meta is not None:
+                fields["meta"] = str(meta)
+            try:
+                entry_id = r.xadd(STREAM, fields)
+            except Exception as e:
+                self._reply(502, {"error": f"redis xadd failed: {e}"})
+                return
+            self._reply(
+                201,
+                {
+                    "ok": True,
+                    "stream": STREAM,
+                    "entry_id": entry_id,
+                    "message_id": msg_id,
+                    "fields": fields,
+                },
+            )
+
+
+    if __name__ == "__main__":
+        port = int(os.environ.get("PORT", "8080"))
+        print(f"stream-api listening on :{port} stream={STREAM} redis={REDIS_HOST}:{REDIS_PORT}")
+        ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stream-api
+  labels:
+    app: stream-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: stream-api
+  template:
+    metadata:
+      labels:
+        app: stream-api
+    spec:
+      containers:
+        - name: api
+          image: python:3.12-alpine
+          command:
+            - sh
+            - -c
+            - pip install --no-cache-dir -q redis && exec python3 /app/server.py
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: stream-lab-config
+          env:
+            - name: PORT
+              value: "8080"
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          volumeMounts:
+            - name: app
+              mountPath: /app
+              readOnly: true
+      volumes:
+        - name: app
+          configMap:
+            name: stream-api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stream-api
+  labels:
+    app: stream-api
+spec:
+  type: ClusterIP
+  selector:
+    app: stream-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: stream-api
+  labels:
+    app: stream-api
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: stream-api.test.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: stream-api
+                port:
+                  number: 80
+
+---
+# -----------------------------------------------------------------------------
+# Worker — XREADGROUP + sleep (simulate processing) + XACK
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stream-worker
+  labels:
+    app: stream-worker
+data:
+  worker.py: |
+    #!/usr/bin/env python3
+    """Consumer-group worker: read → sleep (simulate work) → ACK + e2e latency metrics."""
+    import os
+    import re
+    import time
+
+    import redis
+    from prometheus_client import Counter, Histogram, start_http_server
+
+    HOSTNAME = os.environ.get("HOSTNAME", "unknown")
+    STREAM = os.environ.get("STREAM", "jobs")
+    GROUP = os.environ.get("GROUP", "workers")
+    PROCESS_SECONDS = float(os.environ.get("PROCESS_SECONDS", "3"))
+    BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "100"))
+    REDIS_HOST = os.environ.get("REDIS_HOST", "stream-redis.default.svc")
+    REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
+    BLOCK_MS = int(os.environ.get("BLOCK_MS", "5000"))
+    METRICS_PORT = int(os.environ.get("METRICS_PORT", "9102"))
+
+    # Static consumer name (survives pod restarts). StatefulSet pod
+    # stream-worker-0 → worker_1, stream-worker-1 → worker_2, …
+    # Override with CONSUMER=… if needed.
+    _STATIC_RE = re.compile(r"^worker_\d+$")
+
+
+    def resolve_consumer():
+        explicit = os.environ.get("CONSUMER", "").strip()
+        if explicit:
+            return explicit
+        # StatefulSet hostname ends with -<ordinal>
+        suffix = HOSTNAME.rsplit("-", 1)[-1]
+        if suffix.isdigit():
+            return f"worker_{int(suffix) + 1}"
+        return HOSTNAME
+
+
+    CONSUMER = resolve_consumer()
+
+    r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+
+    # Time from stream enter (XADD / entry id) until XACK in this consumer group.
+    E2E_LATENCY = Histogram(
+        "stream_message_e2e_latency_seconds",
+        "Seconds from message entering the Redis stream until ACK by this consumer group",
+        labelnames=("stream", "group"),
+        buckets=(0.5, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610),
+    )
+    ACKED = Counter(
+        "stream_messages_acked_total",
+        "Messages ACKed by this worker for a consumer group",
+        labelnames=("stream", "group"),
+    )
+
+
+    def ensure_group():
+        try:
+            r.xgroup_create(STREAM, GROUP, id="0", mkstream=True)
+            print(f"created group={GROUP} on stream={STREAM}", flush=True)
+        except redis.ResponseError as e:
+            if "BUSYGROUP" not in str(e):
+                raise
+            print(f"group={GROUP} already exists on stream={STREAM}", flush=True)
+
+
+    def cleanup_noisy_consumers():
+        """Remove old hostname-based consumers; keep static worker_N names."""
+        try:
+            consumers = r.xinfo_consumers(STREAM, GROUP)
+        except Exception as e:
+            print(f"xinfo_consumers: {e}", flush=True)
+            return
+        for c in consumers:
+            name = c.get("name") if isinstance(c, dict) else None
+            if not name or name == CONSUMER:
+                continue
+            if _STATIC_RE.match(name):
+                continue
+            try:
+                removed = r.xgroup_delconsumer(STREAM, GROUP, name)
+                print(
+                    f"removed stale consumer={name} pending_entries={removed}",
+                    flush=True,
+                )
+            except Exception as e:
+                print(f"delconsumer {name}: {e}", flush=True)
+
+
+    def message_enter_time(entry_id, fields):
+        """When the message entered the stream (seconds since epoch)."""
+        produced = fields.get("produced_at")
+        if produced is not None:
+            try:
+                return float(produced)
+            except (TypeError, ValueError):
+                pass
+        # Redis stream IDs are "<unix_ms>-<seq>"
+        try:
+            return int(str(entry_id).split("-", 1)[0]) / 1000.0
+        except (TypeError, ValueError):
+            return None
+
+
+    def observe_e2e(messages, acked_at):
+        for entry_id, fields in messages:
+            t0 = message_enter_time(entry_id, fields or {})
+            if t0 is None:
+                continue
+            latency = acked_at - t0
+            if latency < 0:
+                continue
+            E2E_LATENCY.labels(stream=STREAM, group=GROUP).observe(latency)
+            ACKED.labels(stream=STREAM, group=GROUP).inc()
+
+
+    def process_batch(messages):
+        """Simulate processing a whole batch, then ACK every entry."""
+        ids = [entry_id for entry_id, _fields in messages]
+        print(
+            f"processing batch size={len(messages)} "
+            f"first={ids[0]} last={ids[-1]} sleep={PROCESS_SECONDS}s",
+            flush=True,
+        )
+        time.sleep(PROCESS_SECONDS)
+        acked_at = time.time()
+        if ids:
+            r.xack(STREAM, GROUP, *ids)
+        observe_e2e(messages, acked_at)
+        # quick avg for logs
+        samples = []
+        for entry_id, fields in messages:
+            t0 = message_enter_time(entry_id, fields or {})
+            if t0 is not None:
+                samples.append(acked_at - t0)
+        avg = sum(samples) / len(samples) if samples else 0
+        print(
+            f"acked batch size={len(ids)} e2e_avg_s={avg:.3f} "
+            f"(stream enter → ACK in group={GROUP})",
+            flush=True,
+        )
+
+
+    def claim_stale_pending():
+        """Take over idle PEL entries left by dead consumers (XAUTOCLAIM)."""
+        try:
+            _next_id, messages, _deleted = r.xautoclaim(
+                STREAM,
+                GROUP,
+                CONSUMER,
+                min_idle_time=10000,
+                start_id="0-0",
+                count=BATCH_SIZE,
+            )
+            return messages or []
+        except Exception as e:
+            print(f"xautoclaim: {e}", flush=True)
+            return []
+
+
+    def main():
+        start_http_server(METRICS_PORT)
+        print(
+            f"stream-worker starting consumer={CONSUMER} stream={STREAM} "
+            f"group={GROUP} batch_size={BATCH_SIZE} metrics=:{METRICS_PORT} "
+            f"redis={REDIS_HOST}:{REDIS_PORT}",
+            flush=True,
+        )
+        while True:
+            try:
+                ensure_group()
+                cleanup_noisy_consumers()
+                break
+            except Exception as e:
+                print(f"waiting for redis: {e}", flush=True)
+                time.sleep(2)
+
+        while True:
+            try:
+                # 1) new messages (up to BATCH_SIZE)
+                resp = r.xreadgroup(
+                    GROUP,
+                    CONSUMER,
+                    {STREAM: ">"},
+                    count=BATCH_SIZE,
+                    block=BLOCK_MS,
+                )
+                messages = []
+                if resp:
+                    for _stream_name, batch in resp:
+                        messages.extend(batch)
+                # 2) if idle, reclaim stale pending from dead workers
+                if not messages:
+                    messages = claim_stale_pending()
+                if messages:
+                    process_batch(messages)
+            except Exception as e:
+                print(f"worker loop error: {e}", flush=True)
+                time.sleep(2)
+
+
+    if __name__ == "__main__":
+        main()
+---
+# StatefulSet so ordinals stay stable: stream-worker-0 → consumer worker_1, etc.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: stream-worker
+  labels:
+    app: stream-worker
+spec:
+  serviceName: stream-worker
+  replicas: 2
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: stream-worker
+  template:
+    metadata:
+      labels:
+        app: stream-worker
+    spec:
+      containers:
+        - name: worker
+          image: python:3.12-alpine
+          command:
+            - sh
+            - -c
+            - pip install --no-cache-dir -q redis prometheus_client && exec python3 -u /app/worker.py
+          ports:
+            - name: metrics
+              containerPort: 9102
+          envFrom:
+            - configMapRef:
+                name: stream-lab-config
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: BLOCK_MS
+              value: "5000"
+            - name: METRICS_PORT
+              value: "9102"
+            # CONSUMER derived in code from StatefulSet ordinal → worker_1, worker_2, …
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            periodSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          volumeMounts:
+            - name: app
+              mountPath: /app
+              readOnly: true
+      volumes:
+        - name: app
+          configMap:
+            name: stream-worker
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stream-worker
+  labels:
+    app: stream-worker
+spec:
+  type: ClusterIP
+  selector:
+    app: stream-worker
+  ports:
+    - name: metrics
+      port: 9102
+      targetPort: metrics
+---
+# Scraped by Prometheus Operator (lab4) — ServiceMonitor only (no pod annotations)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: stream-worker
+  labels:
+    app: stream-worker
+spec:
+  selector:
+    matchLabels:
+      app: stream-worker
+  namespaceSelector:
+    matchNames:
+      - default
+  endpoints:
+    - port: metrics
+      interval: 15s
+      path: /metrics
+      scrapeTimeout: 10s

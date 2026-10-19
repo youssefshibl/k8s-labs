@@ -1,0 +1,172 @@
+# =============================================================================
+# Lab 9 — k6 stress CronJob (normal → peak → normal)
+# =============================================================================
+# POSTs /messages with arrival-rate stages:
+#   1) ramp to normal traffic
+#   2) hold normal
+#   3) spike to peak (once)
+#   4) hold peak briefly
+#   5) return to normal
+#   6) hold normal, then ramp down
+#
+# CronJob is suspended by default — trigger manually:
+#   kubectl create job stream-api-k6-manual --from=cronjob/stream-api-k6
+#
+# Apply:
+#   kubectl apply -f lab9/stress-job.yml
+# Optional schedule (unsuspend):
+#   kubectl patch cronjob stream-api-k6 -p '{"spec":{"suspend":false}}'
+# =============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stream-api-k6
+  labels:
+    app: stream-api
+    role: stress
+data:
+  script.js: |
+    import http from 'k6/http';
+    import { check } from 'k6';
+    import { Counter, Trend } from 'k6/metrics';
+
+    const BASE = __ENV.TARGET || 'http://stream-api.default.svc.cluster.local';
+    const URL = `${BASE.replace(/\/$/, '')}/messages`;
+
+    // Optional overrides (reqs/sec)
+    const NORMAL_RPS = Number(__ENV.NORMAL_RPS || 5);
+    const PEAK_RPS = Number(__ENV.PEAK_RPS || 40);
+
+    const posted = new Counter('stream_messages_posted');
+    const latency = new Trend('stream_post_duration', true);
+
+    export const options = {
+      scenarios: {
+        traffic: {
+          executor: 'ramping-arrival-rate',
+          startRate: 0,
+          timeUnit: '1s',
+          preAllocatedVUs: 20,
+          maxVUs: 100,
+          stages: [
+            // --- normal ---
+            { duration: '20s', target: NORMAL_RPS }, // ramp up to normal
+            { duration: '60s', target: NORMAL_RPS }, // steady normal
+            // --- peak (once) ---
+            { duration: '10s', target: PEAK_RPS },   // spike
+            { duration: '30s', target: PEAK_RPS },   // hold peak
+            // --- back to normal ---
+            { duration: '20s', target: NORMAL_RPS }, // cool down
+            { duration: '60s', target: NORMAL_RPS }, // steady normal again
+            { duration: '10s', target: 0 },          // stop
+          ],
+        },
+      },
+      thresholds: {
+        http_req_failed: ['rate<0.05'],
+        http_req_duration: ['p(95)<2000'],
+      },
+    };
+
+    export function setup() {
+      console.log(`k6 → ${URL}  normal=${NORMAL_RPS}/s  peak=${PEAK_RPS}/s`);
+      console.log('stages: normal → peak (once) → normal');
+    }
+
+    export default function () {
+      const n = (__VU * 100000) + __ITER;
+      const payload = JSON.stringify({
+        body: `k6-${__VU}-${n}`,
+        meta: {
+          tool: 'k6',
+          vu: __VU,
+          iter: __ITER,
+          phase: 'traffic',
+        },
+      });
+      const res = http.post(URL, payload, {
+        headers: { 'Content-Type': 'application/json' },
+        tags: { name: 'POST /messages' },
+        timeout: '10s',
+      });
+      const ok = check(res, {
+        'status is 201': (r) => r.status === 201,
+      });
+      if (ok) {
+        posted.add(1);
+      }
+      latency.add(res.timings.duration);
+    }
+
+    export function handleSummary(data) {
+      const fails = data.metrics.http_req_failed;
+      const dur = data.metrics.http_req_duration;
+      const count = data.metrics.http_reqs;
+      console.log(
+        `summary: reqs=${count ? count.values.count : 0} ` +
+          `fail_rate=${fails ? fails.values.rate : 0} ` +
+          `p95_ms=${dur && dur.values['p(95)'] ? dur.values['p(95)'].toFixed(1) : 'n/a'}`
+      );
+      return {};
+    }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: stream-api-k6
+  labels:
+    app: stream-api
+    role: stress
+spec:
+  # Suspended = does not run on schedule; trigger with:
+  #   kubectl create job stream-api-k6-manual --from=cronjob/stream-api-k6
+  suspend: true
+  schedule: "0 */6 * * *"   # every 6h if you set suspend: false
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata:
+      labels:
+        app: stream-api
+        role: stress
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 600
+      template:
+        metadata:
+          labels:
+            app: stream-api
+            role: stress
+            job: k6
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: k6
+              image: grafana/k6:0.54.0
+              args: ["run", "/scripts/script.js"]
+              env:
+                - name: TARGET
+                  value: http://stream-api.default.svc.cluster.local
+                # Steady "normal" traffic (requests/sec)
+                - name: NORMAL_RPS
+                  value: "5"
+                # Single peak spike (requests/sec)
+                - name: PEAK_RPS
+                  value: "400"
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+          volumes:
+            - name: scripts
+              configMap:
+                name: stream-api-k6

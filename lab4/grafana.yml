@@ -23,6 +23,9 @@
 #   kubectl create configmap grafana-dashboards-redis -n monitoring \
 #     --from-file=lab5/redis/dashboards/ \
 #     --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl create configmap grafana-dashboards-redis-streams -n monitoring \
+#     --from-file=lab9/dashboards/ \
+#     --dry-run=client -o yaml | kubectl apply -f -
 #   kubectl create configmap grafana-dashboards-logs -n monitoring \
 #     --from-file=lab6/dashboards/ \
 #     --dry-run=client -o yaml | kubectl apply -f -
@@ -185,6 +188,9 @@ spec:
                   optional: true
               - configMap:
                   name: grafana-dashboards-redis
+                  optional: true
+              - configMap:
+                  name: grafana-dashboards-redis-streams
                   optional: true
               - configMap:
                   name: grafana-dashboards-logs

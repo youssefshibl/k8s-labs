@@ -101,10 +101,8 @@ spec:
     metadata:
       labels:
         app: redis-exporter
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "9121"
-        prometheus.io/path: "/metrics"
+      # Scraped via ServiceMonitor below — do not also set prometheus.io/scrape
+      # or Prometheus will collect every metric twice (duplicate series in Grafana).
     spec:
       containers:
         - name: redis-exporter
