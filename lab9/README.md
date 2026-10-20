@@ -10,6 +10,7 @@ Includes its own **Redis** (`stream-redis`). Optional: **Prometheus / Grafana fr
 |------|---------|
 | [`redis.yml`](redis.yml) | Redis + redis_exporter + Redis Insight UI |
 | [`main.yml`](main.yml) | Config + `stream-api` Deployment + `stream-worker` StatefulSet + Ingress |
+| [`WORKER-E2E-METRICS.md`](WORKER-E2E-METRICS.md) | Worker `/metrics` e2e export — endpoint + code |
 | [`stress-job.yml`](stress-job.yml) | k6 CronJob (suspended) — trigger manually; normal → peak → normal |
 | [`dashboards/redis-streams.json`](dashboards/redis-streams.json) | Grafana board — all `redis_stream_*` metrics |
 
@@ -46,6 +47,8 @@ flowchart LR
   W2 -->|"XREADGROUP + XACK"| Redis
   Exp --> Redis
   Prom -->|ServiceMonitor| Exp
+  Prom -->|ServiceMonitor| W1
+  Prom -->|ServiceMonitor| W2
   Graf -->|query| Prom
 ```
 
@@ -55,7 +58,10 @@ flowchart LR
 2. Workers ensure consumer group `workers` exists (`XGROUP CREATE … MKSTREAM`).
 3. Each worker **XREADGROUP** up to `BATCH_SIZE` (default **100**), sleeps `PROCESS_SECONDS` once for the batch, then **XACK**s all.
 4. redis_exporter exports XINFO metrics (`redis_stream_length`, lag, pending, consumers, …).
-5. Grafana board **Redis Streams** graphs those metrics (variables: stream / group).
+5. Workers export e2e latency on `/metrics` (enter → ACK); Prometheus scrapes both exporter and workers.
+6. Grafana board **Redis Streams** graphs those metrics (variables: stream / group).
+
+Worker e2e `/metrics` (endpoint + code): see [`WORKER-E2E-METRICS.md`](WORKER-E2E-METRICS.md).
 
 ## Prerequisites
 
