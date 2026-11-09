@@ -2,7 +2,7 @@
 # Lab 9 — Redis Streams: producer API + worker (Grafana dashboard separate)
 # =============================================================================
 # Prerequisites:
-#   - Redis + Insight from lab9/redis.yml (stream-redis.default.svc:6379)
+#   - Redis 6.2.3 + Insight from lab9/redis.yml (stream-redis.default.svc:6379)
 #   - ingress-nginx + *.test.local DNS
 #   - Grafana board: lab9/dashboards/ (see README)
 #
@@ -332,7 +332,6 @@ data:
         except redis.ResponseError as e:
             if "BUSYGROUP" not in str(e):
                 raise
-            print(f"group={GROUP} already exists on stream={STREAM}", flush=True)
 
 
     def cleanup_noisy_consumers():
@@ -415,7 +414,7 @@ data:
     def claim_stale_pending():
         """Take over idle PEL entries left by dead consumers (XAUTOCLAIM)."""
         try:
-            _next_id, messages, _deleted = r.xautoclaim(
+            result = r.xautoclaim(
                 STREAM,
                 GROUP,
                 CONSUMER,
@@ -423,7 +422,11 @@ data:
                 start_id="0-0",
                 count=BATCH_SIZE,
             )
-            return messages or []
+            # Redis 6.2: (next_id, messages)
+            # Redis 7+:   (next_id, messages, deleted_ids)
+            if not result or len(result) < 2:
+                return []
+            return result[1] or []
         except Exception as e:
             print(f"xautoclaim: {e}", flush=True)
             return []
@@ -448,6 +451,8 @@ data:
 
         while True:
             try:
+                # Redis is ephemeral (--save "", no AOF); recreate group after restarts
+                ensure_group()
                 # 1) new messages (up to BATCH_SIZE)
                 resp = r.xreadgroup(
                     GROUP,

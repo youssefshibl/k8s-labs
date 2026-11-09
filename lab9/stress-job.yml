@@ -7,7 +7,8 @@
 #   3) spike to peak (once)
 #   4) hold peak briefly
 #   5) return to normal
-#   6) hold normal, then ramp down
+#   6) hold normal
+#   7) low load for 30s, then stop
 #
 # CronJob is suspended by default — trigger manually:
 #   kubectl create job stream-api-k6-manual --from=cronjob/stream-api-k6
@@ -37,6 +38,7 @@ data:
     // Optional overrides (reqs/sec)
     const NORMAL_RPS = Number(__ENV.NORMAL_RPS || 5);
     const PEAK_RPS = Number(__ENV.PEAK_RPS || 40);
+    const LOW_RPS = Number(__ENV.LOW_RPS || 1);
 
     const posted = new Counter('stream_messages_posted');
     const latency = new Trend('stream_post_duration', true);
@@ -59,6 +61,9 @@ data:
             // --- back to normal ---
             { duration: '20s', target: NORMAL_RPS }, // cool down
             { duration: '60s', target: NORMAL_RPS }, // steady normal again
+            // --- low load at the end ---
+            { duration: '10s', target: LOW_RPS },    // ramp down to low
+            { duration: '30s', target: LOW_RPS },    // hold low
             { duration: '10s', target: 0 },          // stop
           ],
         },
@@ -70,8 +75,8 @@ data:
     };
 
     export function setup() {
-      console.log(`k6 → ${URL}  normal=${NORMAL_RPS}/s  peak=${PEAK_RPS}/s`);
-      console.log('stages: normal → peak (once) → normal');
+      console.log(`k6 → ${URL}  normal=${NORMAL_RPS}/s  peak=${PEAK_RPS}/s  low=${LOW_RPS}/s`);
+      console.log('stages: normal → peak (once) → normal → low (30s)');
     }
 
     export default function () {
@@ -155,6 +160,9 @@ spec:
                 # Single peak spike (requests/sec)
                 - name: PEAK_RPS
                   value: "400"
+                # Low load at the end (requests/sec), held 30s
+                - name: LOW_RPS
+                  value: "1"
               volumeMounts:
                 - name: scripts
                   mountPath: /scripts

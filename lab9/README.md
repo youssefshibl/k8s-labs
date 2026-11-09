@@ -2,7 +2,7 @@
 
 HTTP **producer** pushes messages onto a Redis stream; **workers** consume via a consumer group and simulate processing with `sleep`. Observe everything redis_exporter exposes for the stream in Grafana (**Redis Streams**).
 
-Includes its own **Redis** (`stream-redis`). Optional: **Prometheus / Grafana from [lab4](../lab4/)** for the streams board.
+Includes its own **Redis 6.2.3** (`stream-redis`, image `redis:6.2.3-alpine`). Optional: **Prometheus / Grafana from [lab4](../lab4/)** for the streams board.
 
 ## Files
 
@@ -23,7 +23,7 @@ Includes its own **Redis** (`stream-redis`). Optional: **Prometheus / Grafana fr
 | StatefulSet | `stream-worker` | 2 pods · static consumers `worker_1` / `worker_2` · e2e `/metrics` |
 | Service / ServiceMonitor | `stream-worker` | Prometheus scrapes worker histogram (enter → ACK) |
 | ConfigMap (monitoring) | `grafana-dashboards-redis-streams` | Grafana board **Redis Streams** |
-| Deployment/Service | `stream-redis` | Lab Redis (`stream-redis.default.svc:6379`) |
+| Deployment/Service | `stream-redis` | Redis **6.2.3** (`stream-redis.default.svc:6379`) |
 | Deployment/Service/ServiceMonitor | `stream-redis-exporter` | Scrapes stream `jobs` for Grafana |
 | Deployment/Service/Ingress | `redis-insight` | UI at `redis-insight.test.local` → `stream-redis.default.svc:6379` |
 
@@ -34,7 +34,7 @@ flowchart LR
   Client["curl"]
   IC["ingress-nginx"]
   API["stream-api<br/>POST /messages"]
-  Redis["stream-redis<br/>stream jobs"]
+  Redis["stream-redis 6.2.3<br/>stream jobs"]
   W1["stream-worker"]
   W2["stream-worker"]
   Exp["stream-redis-exporter"]
@@ -57,7 +57,7 @@ flowchart LR
 1. `POST /messages` with JSON `{"body":"..."}` runs **XADD** on stream `jobs`.
 2. Workers ensure consumer group `workers` exists (`XGROUP CREATE … MKSTREAM`).
 3. Each worker **XREADGROUP** up to `BATCH_SIZE` (default **100**), sleeps `PROCESS_SECONDS` once for the batch, then **XACK**s all.
-4. redis_exporter exports XINFO metrics (`redis_stream_length`, lag, pending, consumers, …).
+4. redis_exporter exports XINFO metrics available on Redis 6.2 (`redis_stream_length`, pending, consumers, last IDs, …). Redis 7-only fields (`lag`, `entries-added`, `entries-read`) are not present; the board uses ID-time lag, stream length, and worker ACKs instead.
 5. Workers export e2e latency on `/metrics` (enter → ACK); Prometheus scrapes both exporter and workers.
 6. Grafana board **Redis Streams** graphs those metrics (variables: stream / group).
 
@@ -134,7 +134,7 @@ curl -s -X POST http://stream-api.test.local/messages \
 
 ## Stress test (k6 CronJob — manual trigger)
 
-[k6](https://k6.io) drives `POST /messages` with **ramping-arrival-rate** stages (~3.5 min total).
+[k6](https://k6.io) drives `POST /messages` with **ramping-arrival-rate** stages (~4 min total).
 
 CronJob is **`suspend: true`** by default (no automatic runs). Trigger whenever you want:
 
@@ -142,10 +142,12 @@ CronJob is **`suspend: true`** by default (no automatic runs). Trigger whenever 
 |-------|----------|------|
 | Ramp to normal | 20s | → 5 req/s |
 | Normal | 60s | 5 req/s |
-| Spike to peak | 10s | → 40 req/s |
-| Hold peak | 30s | 40 req/s |
+| Spike to peak | 10s | → 400 req/s |
+| Hold peak | 30s | 400 req/s |
 | Cool down | 20s | → 5 req/s |
 | Normal again | 60s | 5 req/s |
+| Ramp to low | 10s | → 1 req/s |
+| Low load | 30s | 1 req/s |
 | Stop | 10s | → 0 |
 
 Install CronJob once:
@@ -177,7 +179,7 @@ kubectl patch cronjob stream-api-k6 -p '{"spec":{"suspend":false}}'
 kubectl patch cronjob stream-api-k6 -p '{"spec":{"suspend":true}}'
 ```
 
-Tune rates: edit `NORMAL_RPS` / `PEAK_RPS` in `stress-job.yml`, then `kubectl apply -f lab9/stress-job.yml`.
+Tune rates: edit `NORMAL_RPS` / `PEAK_RPS` / `LOW_RPS` in `stress-job.yml`, then `kubectl apply -f lab9/stress-job.yml`.
 
 ## Grafana panels (metrics covered)
 
@@ -185,11 +187,11 @@ Tune rates: edit `NORMAL_RPS` / `PEAK_RPS` in `stress-job.yml`, then `kubectl ap
 |-------|--------|
 | Stream length | `redis_stream_length` |
 | Consumer groups | `redis_stream_groups` |
-| Group lag | `redis_stream_group_lag` |
+| Delivery lag (ID time) | `redis_stream_last_generated_id` − `redis_stream_group_last_delivered_id` (Redis 6.2 has no `lag`) |
 | Pending | `redis_stream_group_messages_pending` |
 | Consumers | `redis_stream_group_consumers` |
-| Entries added | `redis_stream_entries_added_total` (+ rate) |
-| Entries read | `redis_stream_group_entries_read` |
+| Entries added | `redis_stream_length` (+ rate) — lab never trims, so length = XADD count |
+| Entries ACKed | `stream_messages_acked_total` (worker; Redis 6.2 has no `entries-read`) |
 | Pending / idle per consumer | `redis_stream_group_consumer_*` |
 | First / last / generated / delivered IDs | `redis_stream_*_entry_id`, `*_last_delivered_id` |
 | Radix tree | `redis_stream_radix_tree_keys`, `redis_stream_radix_tree_nodes` |
@@ -200,9 +202,10 @@ Tune rates: edit `NORMAL_RPS` / `PEAK_RPS` in `stress-job.yml`, then `kubectl ap
 
 | Action | What you see in Grafana |
 |--------|-------------------------|
-| During k6 normal | steady entries-added rate (~5/s), low lag |
-| During k6 peak | entries-added rate spike, lag / pending ↑ |
-| After peak (normal again) | rate drops, lag / pending drain |
+| During k6 normal | steady added rate (~5/s), low delivery lag / pending |
+| During k6 peak | added rate spike, delivery lag / pending ↑ |
+| After peak (normal again) | rate drops, delivery lag / pending drain |
+| Low load (last 30s) | added rate ~1/s, lag / pending stay drained |
 | Scale workers | `kubectl scale sts/stream-worker --replicas=4` → `worker_1`…`worker_4` |
 
 ## Cleanup

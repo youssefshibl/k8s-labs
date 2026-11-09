@@ -134,7 +134,7 @@ def process_batch(messages):
 Flow:
 
 ```text
-XREADGROUP (or XAUTOCLAIM)
+XREADGROUP (or XAUTOCLAIM — Redis 6.2 returns next_id + messages)
     → sleep(PROCESS_SECONDS)
     → acked_at = now()
     → XACK

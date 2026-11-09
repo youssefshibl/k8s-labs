@@ -1,7 +1,8 @@
 # =============================================================================
-# Lab 9 — Redis + redis_exporter + Redis Insight
+# Lab 9 — Redis 6.2.3 + redis_exporter + Redis Insight
 # =============================================================================
 # Self-contained Redis for streams (no lab5 dependency).
+# Image: redis:6.2.3-alpine (Streams + XAUTOCLAIM; no Redis 7 lag / entries-added).
 # Stream key scraped: jobs (REDIS_EXPORTER_CHECK_SINGLE_STREAMS)
 #
 # Apply (from repo root):
@@ -34,7 +35,8 @@ spec:
     spec:
       containers:
         - name: redis
-          image: redis:7.4-alpine
+          image: redis:6.2.3-alpine
+          imagePullPolicy: IfNotPresent
           args: ["redis-server", "--save", "", "--appendonly", "no"]
           ports:
             - name: redis

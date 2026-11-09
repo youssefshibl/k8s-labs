@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "Redis Streams (redis_exporter XINFO) + worker e2e latency (stream enter \u2192 group ACK). Hover (i) on panels for details.",
+  "description": "Redis 6.2.3 Streams (redis_exporter XINFO) + worker e2e latency (stream enter \u2192 group ACK). Hover (i) on panels for details.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -178,8 +178,8 @@
               }
             ]
           },
-          "unit": "short",
-          "description": "redis_stream_group_lag \u2014 Messages still waiting to be delivered to the group (not yet read via XREADGROUP >). High lag means producers are ahead of consumers."
+          "unit": "ms",
+          "description": "last-generated-id minus last-delivered-id (unix ms from stream IDs). Redis 6.2 has no XINFO lag field (Redis 7+); a growing gap means producers are ahead of XREADGROUP."
         }
       },
       "gridPos": {
@@ -201,16 +201,16 @@
         },
         "textMode": "auto"
       },
-      "title": "Group lag",
+      "title": "Delivery lag (ID time)",
       "type": "stat",
       "targets": [
         {
-          "expr": "sum(redis_stream_group_lag{job=\"stream-redis-exporter\", stream=~\"$stream\", group=~\"$group\"}) or vector(0)",
+          "expr": "clamp_min(max(redis_stream_last_generated_id{job=\"stream-redis-exporter\", stream=~\"$stream\"}) - max(redis_stream_group_last_delivered_id{job=\"stream-redis-exporter\", stream=~\"$stream\", group=~\"$group\"}), 0) or vector(0)",
           "legendFormat": "lag",
           "refId": "A"
         }
       ],
-      "description": "redis_stream_group_lag \u2014 Messages still waiting to be delivered to the group (not yet read via XREADGROUP >). High lag means producers are ahead of consumers."
+      "description": "last-generated-id minus last-delivered-id (unix ms from stream IDs). Redis 6.2 has no XINFO lag field (Redis 7+); a growing gap means producers are ahead of XREADGROUP."
     },
     {
       "datasource": {
@@ -346,7 +346,7 @@
             ]
           },
           "unit": "short",
-          "description": "redis_stream_entries_added_total \u2014 Lifetime count of entries ever added to the stream (XADD). Monotonic; unlike length, it does not shrink when entries are trimmed."
+          "description": "redis_stream_length \u2014 Redis 6.2 has no entries-added counter (Redis 7+). This lab does not trim, so length equals total XADD count."
         }
       },
       "gridPos": {
@@ -368,16 +368,16 @@
         },
         "textMode": "auto"
       },
-      "title": "Entries added (total)",
+      "title": "Entries added (length)",
       "type": "stat",
       "targets": [
         {
-          "expr": "redis_stream_entries_added_total{job=\"stream-redis-exporter\", stream=~\"$stream\"}",
+          "expr": "redis_stream_length{job=\"stream-redis-exporter\", stream=~\"$stream\"}",
           "legendFormat": "{{stream}}",
           "refId": "A"
         }
       ],
-      "description": "redis_stream_entries_added_total \u2014 Lifetime count of entries ever added to the stream (XADD). Monotonic; unlike length, it does not shrink when entries are trimmed."
+      "description": "redis_stream_length \u2014 Redis 6.2 has no entries-added counter (Redis 7+). This lab does not trim, so length equals total XADD count."
     },
     {
       "collapsed": false,
@@ -391,7 +391,7 @@
       "panels": [],
       "title": "Stream & group time series",
       "type": "row",
-      "description": "Trends over time for stream size, backlog (lag/pending), and produce/consume activity."
+      "description": "Trends over time for stream size, backlog (delivery lag / pending), and produce/consume activity."
     },
     {
       "datasource": {
@@ -462,8 +462,8 @@
             "showPoints": "never",
             "spanNulls": true
           },
-          "unit": "short",
-          "description": "redis_stream_group_lag over time \u2014 Backlog of undelivered messages for the group. Spikes during produce bursts; should fall as workers catch up."
+          "unit": "ms",
+          "description": "last-generated-id minus last-delivered-id over time (unix ms). Redis 6.2 has no XINFO lag field; spikes during produce bursts and falls as workers catch up."
         }
       },
       "gridPos": {
@@ -486,16 +486,16 @@
           "sort": "desc"
         }
       },
-      "title": "Group lag",
+      "title": "Delivery lag (ID time)",
       "type": "timeseries",
       "targets": [
         {
-          "expr": "redis_stream_group_lag{job=\"stream-redis-exporter\", stream=~\"$stream\", group=~\"$group\"}",
+          "expr": "clamp_min(max by (stream) (redis_stream_last_generated_id{job=\"stream-redis-exporter\", stream=~\"$stream\"}) - on(stream) group_right(group) max by (stream, group) (redis_stream_group_last_delivered_id{job=\"stream-redis-exporter\", stream=~\"$stream\", group=~\"$group\"}), 0)",
           "legendFormat": "{{group}}",
           "refId": "A"
         }
       ],
-      "description": "redis_stream_group_lag over time \u2014 Backlog of undelivered messages for the group. Spikes during produce bursts; should fall as workers catch up."
+      "description": "last-generated-id minus last-delivered-id over time (unix ms). Redis 6.2 has no XINFO lag field; spikes during produce bursts and falls as workers catch up."
     },
     {
       "datasource": {
@@ -567,7 +567,7 @@
             "spanNulls": true
           },
           "unit": "short",
-          "description": "redis_stream_group_entries_read \u2014 Total entries the consumer group has read from the stream so far (XINFO GROUPS entries-read). Increases as workers consume."
+          "description": "stream_messages_acked_total \u2014 Redis 6.2 has no XINFO entries-read (Redis 7+). This is ACKs observed by stream-worker (resets if workers restart)."
         }
       },
       "gridPos": {
@@ -590,16 +590,16 @@
           "sort": "desc"
         }
       },
-      "title": "Entries read (group)",
+      "title": "Entries ACKed (workers)",
       "type": "timeseries",
       "targets": [
         {
-          "expr": "redis_stream_group_entries_read{job=\"stream-redis-exporter\", stream=~\"$stream\", group=~\"$group\"}",
+          "expr": "sum by (group) (stream_messages_acked_total{job=\"stream-worker\", stream=~\"$stream\", group=~\"$group\"})",
           "legendFormat": "{{group}}",
           "refId": "A"
         }
       ],
-      "description": "redis_stream_group_entries_read \u2014 Total entries the consumer group has read from the stream so far (XINFO GROUPS entries-read). Increases as workers consume."
+      "description": "stream_messages_acked_total \u2014 Redis 6.2 has no XINFO entries-read (Redis 7+). This is ACKs observed by stream-worker (resets if workers restart)."
     },
     {
       "datasource": {
@@ -619,7 +619,7 @@
             "spanNulls": true
           },
           "unit": "ops",
-          "description": "rate(redis_stream_entries_added_total[1m]) \u2014 Approximate XADD rate (entries/sec) for the stream. Useful while load-testing with curl bursts."
+          "description": "rate(redis_stream_length[1m]) \u2014 Approximate XADD rate. Redis 6.2 has no entries-added; this lab does not trim, so length only grows with XADD."
         }
       },
       "gridPos": {
@@ -646,12 +646,12 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "rate(redis_stream_entries_added_total{job=\"stream-redis-exporter\", stream=~\"$stream\"}[1m])",
+          "expr": "rate(redis_stream_length{job=\"stream-redis-exporter\", stream=~\"$stream\"}[1m])",
           "legendFormat": "{{stream}}",
           "refId": "A"
         }
       ],
-      "description": "rate(redis_stream_entries_added_total[1m]) \u2014 Approximate XADD rate (entries/sec) for the stream. Useful while load-testing with curl bursts."
+      "description": "rate(redis_stream_length[1m]) \u2014 Approximate XADD rate. Redis 6.2 has no entries-added; this lab does not trim, so length only grows with XADD."
     },
     {
       "collapsed": false,
@@ -1522,12 +1522,12 @@
           "type": "prometheus",
           "uid": "prometheus"
         },
-        "definition": "label_values(redis_stream_group_lag{job=\"stream-redis-exporter\",stream=~\"$stream\"}, group)",
+        "definition": "label_values(redis_stream_group_messages_pending{job=\"stream-redis-exporter\",stream=~\"$stream\"}, group)",
         "includeAll": true,
         "allValue": ".*",
         "name": "group",
         "query": {
-          "query": "label_values(redis_stream_group_lag{job=\"stream-redis-exporter\",stream=~\"$stream\"}, group)",
+          "query": "label_values(redis_stream_group_messages_pending{job=\"stream-redis-exporter\",stream=~\"$stream\"}, group)",
           "refId": "StandardVariableQuery"
         },
         "refresh": 2,
