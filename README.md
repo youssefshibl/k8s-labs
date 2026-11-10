@@ -13,6 +13,7 @@ Local Kubernetes labs on kind (`kind-dev`) with MetalLB + nginx Ingress.
 | [lab7](lab7/) | OpenTelemetry Operator + Jaeger traces (auto-instrumentation demos) |
 | [lab8](lab8/) | Horizontal Pod Autoscaler — CPU web app + stress Job |
 | [lab9](lab9/) | Redis Streams — producer API + workers + stream dashboard |
+| [lab10](lab10/) | Redis Streams + KEDA — lag-based worker autoscaling |
 
 ## Architecture overview
 
@@ -93,6 +94,18 @@ flowchart TB
     StreamRedis -->|"redis_stream_*"| Prom
   end
 
+  subgraph lab10 [Lab 10]
+    L10Redis["stream-redis 7 + exporter"]
+    L10API["stream-api<br/>POST /messages"]
+    L10Workers["stream-worker Deployment"]
+    L10KEDA["KEDA ScaledObject<br/>redis-streams lag"]
+    L10API -->|"XADD"| L10Redis
+    L10Workers -->|"XREADGROUP"| L10Redis
+    L10KEDA -->|"lag"| L10Redis
+    L10KEDA -->|"scale"| L10Workers
+    L10Redis -->|"redis_stream_*"| Prom
+  end
+
   DNS --> LB --> IC
   IC --> L1Ing
   IC --> L2Ing
@@ -127,6 +140,7 @@ kubectl apply -f lab4/grafana.yml
 # lab7 — OTel Operator + Jaeger traces (see lab7/README.md)
 # lab8 — HPA + stress Job (see lab8/README.md; needs metrics-server)
 # lab9 — Redis Streams (own Redis + producer/worker/dashboard; see lab9/README.md)
+# lab10 — Redis Streams + KEDA worker autoscaling (see lab10/README.md; needs KEDA)
 
 # dashboard UI (after Dashboard + local CA are installed)
 kubectl apply -f setup/dashboard/admin-user.yml
