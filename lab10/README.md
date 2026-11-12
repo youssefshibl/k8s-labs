@@ -23,7 +23,7 @@ Uses its own **Redis 7.2** (`stream-redis`, image `redis:7.2-alpine`). Optional:
 | ConfigMap | `stream-lab-config` | `STREAM=jobs`, `GROUP=workers`, `BATCH_SIZE=100`, `PROCESS_SECONDS=3` |
 | Deployment/Service/Ingress | `stream-api` | `POST /messages` → `XADD` · host `stream-api.test.local` |
 | Deployment | `stream-worker` | starts at 1 replica · consumer name = pod hostname · e2e `/metrics` |
-| ScaledObject / HPA | `stream-worker` | KEDA owns replicas · `lagCount=100` · min 1 / max 10 |
+| ScaledObject / HPA | `stream-worker` | KEDA owns replicas · `lagCount=10` · min 1 / max 10 |
 | Service / ServiceMonitor | `stream-worker` | Prometheus scrapes worker histogram (enter → ACK) |
 | ConfigMap (monitoring) | `grafana-dashboards-redis-streams` | Grafana board **Redis Streams** |
 | Deployment/Service | `stream-redis` | Redis **7.2** (`stream-redis.default.svc:6379`) |
@@ -60,7 +60,7 @@ flowchart LR
 1. `POST /messages` with JSON `{"body":"..."}` runs **XADD** on stream `jobs`.
 2. Workers ensure consumer group `workers` exists (`XGROUP CREATE … MKSTREAM`).
 3. Each worker **XREADGROUP** up to `BATCH_SIZE` (default **100**), sleeps `PROCESS_SECONDS` once for the batch, then **XACK**s all.
-4. KEDA polls Redis every **5s**, reads consumer-group **lag**, and sets desired replicas ≈ `ceil(lag / lagCount)` (`lagCount=100`), clamped to **1…10**.
+4. KEDA polls Redis every **5s**, reads consumer-group **lag** (entries not yet delivered to the group), and sets desired replicas ≈ `ceil(lag / lagCount)` (`lagCount=10`), clamped to **1…10**.
 5. On scale-down, remaining workers **XAUTOCLAIM** idle PEL entries; idle consumers with empty PEL are deleted after ~60s.
 6. redis_exporter + worker `/metrics` feed Grafana (**Redis Streams**).
 
@@ -235,7 +235,7 @@ Tune KEDA: edit `lagCount` / `maxReplicaCount` / `cooldownPeriod` on the ScaledO
 |--------|----------------|
 | Idle / light load | 1 worker pod; lag near 0; ScaledObject Ready |
 | During k6 peak | lag ↑; HPA/ScaledObject raises replicas toward **10** |
-| After peak | lag drains; after `cooldownPeriod` (30s) replicas fall back toward **1** |
+| After peak | lag drains; replicas fall back toward **1** after the HPA scale-down window (~5 min default — `cooldownPeriod` only applies to scale-to-zero) |
 | Grafana during peak | delivery lag / pending ↑ then drain as workers catch up |
 | Redis Insight | more consumers appear while scaled out; idle ones cleaned after ~60s |
 
